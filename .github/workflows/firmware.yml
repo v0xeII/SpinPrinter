@@ -1,0 +1,83 @@
+# Builds the SpinScreen firmware (ESP32-S3) and publishes the browser flasher on GitHub Pages:
+#   https://v0xeii.github.io/SpinPrinter/   (Chrome/Edge, Windows/Linux/Mac, no Arduino IDE)
+# One-time setup in the repository: Settings -> Pages -> Source: GitHub Actions.
+# A tag v* also attaches the firmware files to a GitHub release.
+name: firmware
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+env:
+  ESP32_CORE: "3.3.10"
+  FQBN: "esp32:esp32:esp32s3:CDCOnBoot=cdc"
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: ESP32 core
+        run: |
+          arduino-cli config init --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install "esp32:esp32@$ESP32_CORE"
+      - name: compile
+        run: arduino-cli compile --fqbn "$FQBN" --build-path build SpinScreen_v0.7/SpinScreen
+      - name: flasher site (page + firmware parts + manifest)
+        run: |
+          VER=$(sed -n 's/#define FW_VERSION "\(.*\)"/\1/p' SpinScreen_v0.7/SpinScreen/config.h)
+          mkdir -p site/fw
+          cp flasher/index.html docs/wiring.svg site/
+          cp build/SpinScreen.ino.bootloader.bin site/fw/bootloader.bin
+          cp build/SpinScreen.ino.partitions.bin site/fw/partitions.bin
+          cp build/SpinScreen.ino.bin site/fw/spinscreen.bin
+          cp "$(find ~/.arduino15/packages/esp32/hardware/esp32 -name boot_app0.bin | head -1)" site/fw/boot_app0.bin
+          cp build/SpinScreen.ino.merged.bin site/fw/spinscreen-merged.bin
+          # separate parts, not the merged image: the settings partition (nvs, 0x9000) is left alone
+          cat > site/manifest.json <<JSON
+          {
+            "name": "SpinScreen",
+            "version": "$VER",
+            "new_install_prompt_erase": false,
+            "builds": [{
+              "chipFamily": "ESP32-S3",
+              "parts": [
+                {"path": "fw/bootloader.bin", "offset": 0},
+                {"path": "fw/partitions.bin", "offset": 32768},
+                {"path": "fw/boot_app0.bin", "offset": 57344},
+                {"path": "fw/spinscreen.bin", "offset": 65536}
+              ]
+            }]
+          }
+          JSON
+          python3 -m json.tool site/manifest.json > /dev/null
+          ls -la site site/fw
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: release files (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp site/fw/spinscreen-merged.bin "spinscreen-${GITHUB_REF_NAME}-merged.bin"
+          gh release create "$GITHUB_REF_NAME" "spinscreen-${GITHUB_REF_NAME}-merged.bin" --title "SpinPrinter $GITHUB_REF_NAME" \
+            --notes "SpinScreen firmware: flash from the browser at https://v0xeii.github.io/SpinPrinter/ or write the merged image at 0x0." \
+            || gh release upload "$GITHUB_REF_NAME" "spinscreen-${GITHUB_REF_NAME}-merged.bin" --clobber
+    permissions:
+      contents: write
+  pages:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

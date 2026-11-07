@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a080b">
+<title>SpinPrinter Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;600;800&display=swap" rel="stylesheet">
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<style>
+:root{--bg:#0a080b;--panel:#151016;--line:#2a2029;--text:#f7e3ec;--dim:#a88f9b;--pink:#ff8db5;--hot:#ff4f9a;--dark:#170910;
+  --font:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;background:radial-gradient(800px 420px at 85% -10%,rgba(255,79,154,.16),transparent 60%),var(--bg)}
+.wrap{max-width:860px;margin:0 auto;padding:28px 16px 60px}
+header{display:flex;align-items:center;gap:14px;margin-bottom:26px}
+header h1{margin:0;font-size:26px;font-weight:800;color:var(--pink);letter-spacing:-.5px;flex:1}
+header small{display:block;color:var(--dim);font-size:13px;font-weight:600;margin-top:2px}
+.lang{background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:99px;padding:6px 14px;cursor:pointer;font:600 13px var(--font)}
+.card{background:linear-gradient(180deg,#1c151e,var(--panel));border:1px solid var(--line);border-radius:20px;padding:22px;margin-bottom:16px}
+.card h2{margin:0 0 12px;font-size:13px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);font-weight:600}
+.step{display:flex;gap:14px;margin:12px 0;line-height:1.55}
+.step b.n{flex:none;width:28px;height:28px;border-radius:50%;background:var(--dark);border:1px solid var(--hot);color:var(--pink);display:grid;place-items:center;font-size:14px}
+p,li{color:var(--text);line-height:1.6}
+.dim{color:var(--dim);font-size:14px}
+code{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:2px 7px;font-size:14px;word-break:break-all}
+esp-web-install-button{display:block;margin:18px 0 6px}
+esp-web-install-button button,.btn{font:700 17px var(--font);border:0;border-radius:16px;padding:15px 28px;cursor:pointer;color:var(--dark);background:var(--pink);text-decoration:none;display:inline-block}
+esp-web-install-button button:hover,.btn:hover{background:var(--hot)}
+.warn{border-left:3px solid var(--hot);padding:8px 14px;background:var(--dark);border-radius:0 12px 12px 0;color:var(--dim);font-size:14px}
+img.wiring{width:100%;height:auto;border-radius:14px;border:1px solid var(--line)}
+a{color:var(--pink)}
+footer{color:var(--dim);font-size:13px;text-align:center;margin-top:28px}
+[data-l]{display:none} html[lang=ru] [data-l=ru], html[lang=en] [data-l=en]{display:revert}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>SpinPrinter<small><span data-l="ru">прошивка экрана и настройка</span><span data-l="en">screen firmware and setup</span></small></h1>
+    <button class="lang" id="lang">EN</button>
+  </header>
+
+  <section class="card">
+    <h2><span data-l="ru">1 · Прошить ESP32-S3 (экран, кнопки, мотор)</span><span data-l="en">1 · Flash the ESP32-S3 (screen, buttons, motor)</span></h2>
+    <div class="step"><b class="n">1</b><div data-l="ru">Подключи ESP32-S3 Super Mini к компьютеру USB-кабелем <b>с данными</b>. Windows, Linux и Mac подходят, ставить ничего не нужно.</div>
+      <div data-l="en">Plug the ESP32-S3 Super Mini into the computer with a USB cable <b>that carries data</b>. Windows, Linux and Mac all work, nothing to install.</div></div>
+    <div class="step"><b class="n">2</b><div data-l="ru">Нажми кнопку ниже и выбери порт <code>USB JTAG/serial debug unit</code> (или <code>COM…</code> на Windows).</div>
+      <div data-l="en">Press the button below and pick the port <code>USB JTAG/serial debug unit</code> (or <code>COM…</code> on Windows).</div></div>
+    <esp-web-install-button manifest="manifest.json">
+      <button slot="activate"><span data-l="ru">Прошить SpinScreen</span><span data-l="en">Flash SpinScreen</span></button>
+      <span slot="unsupported"><p class="warn"><span data-l="ru">Этот браузер не умеет работать с USB-портом. Открой страницу в Chrome или Edge на компьютере.</span><span data-l="en">This browser cannot talk to USB serial ports. Open the page in Chrome or Edge on a computer.</span></p></span>
+      <span slot="not-allowed"><p class="warn"><span data-l="ru">Нужна защищённая страница (https).</span><span data-l="en">The page must be served over https.</span></p></span>
+    </esp-web-install-button>
+    <p class="dim" id="ver"></p>
+    <p class="warn"><span data-l="ru">Порт не появляется? Кабель «только для зарядки» — возьми другой. Не прошивается? Зажми BOOT, нажми и отпусти RESET, отпусти BOOT и попробуй снова. Настройки платы (скорость, язык, аксолотль) при прошивке сохраняются.</span>
+      <span data-l="en">No port in the list? The cable only charges: try another one. Flashing fails? Hold BOOT, press and release RESET, release BOOT and try again. The board's settings (speed, language, axolotl) are kept.</span></p>
+  </section>
+
+  <section class="card">
+    <h2><span data-l="ru">2 · Raspberry Pi</span><span data-l="en">2 · Raspberry Pi</span></h2>
+    <div class="step"><b class="n">1</b><div data-l="ru"><a href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a> → Raspberry Pi 3 → <b>Raspberry Pi OS Lite (64-bit)</b> → настройки: имя <code>spinslicer</code>, пользователь и пароль, твой Wi-Fi, включить SSH → записать.</div>
+      <div data-l="en"><a href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a> → Raspberry Pi 3 → <b>Raspberry Pi OS Lite (64-bit)</b> → settings: hostname <code>spinslicer</code>, user and password, your Wi-Fi, enable SSH → write.</div></div>
+    <div class="step"><b class="n">2</b><div data-l="ru">Карту в Pi, питание <b>5 В 2,5 А</b>, подожди 3 минуты. На компьютере (Windows: PowerShell): <code>ssh имя@spinslicer.local</code></div>
+      <div data-l="en">Card into the Pi, a <b>5 V 2.5 A</b> power supply, wait 3 minutes. On the computer (Windows: PowerShell): <code>ssh user@spinslicer.local</code></div></div>
+    <div class="step"><b class="n">3</b><div><span data-l="ru">На Pi одна команда (10–20 минут, потом Pi перезагрузится):</span><span data-l="en">One command on the Pi (10–20 minutes, then the Pi reboots):</span><br>
+      <code>curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash</code></div></div>
+    <p class="dim"><span data-l="ru">Есть Linux? Всё то же одной командой с компьютера: <code>sudo bash SpinPi/make_sd_card.sh</code></span><span data-l="en">On Linux the same is one command on the computer: <code>sudo bash SpinPi/make_sd_card.sh</code></span></p>
+  </section>
+
+  <section class="card">
+    <h2><span data-l="ru">3 · Как соединить</span><span data-l="en">3 · Wiring</span></h2>
+    <p data-l="ru">ESP32 и Pi: <b>USB-кабель</b> или <b>4 провода</b> (TX и RX накрест). Работает и так, и так, ничего переключать не надо.</p>
+    <p data-l="en">ESP32 and Pi: a <b>USB cable</b> or <b>4 wires</b> (TX and RX crossed). Either works, nothing to switch.</p>
+    <img class="wiring" src="wiring.svg" alt="SpinPrinter wiring">
+  </section>
+
+  <footer><a href="https://github.com/v0xeII/SpinPrinter">github.com/v0xeII/SpinPrinter</a></footer>
+</div>
+<script>
+const root = document.documentElement;
+let lang = (navigator.language || "ru").startsWith("ru") ? "ru" : "en";
+try { lang = localStorage.getItem("spinprinter-lang") || lang; } catch (e) {}
+function apply() { root.lang = lang; document.getElementById("lang").textContent = lang === "ru" ? "EN" : "RU"; }
+document.getElementById("lang").onclick = () => { lang = lang === "ru" ? "en" : "ru"; try { localStorage.setItem("spinprinter-lang", lang); } catch (e) {} apply(); };
+apply();
+fetch("manifest.json").then(r => r.json()).then(m => { document.getElementById("ver").textContent = "SpinScreen " + m.version; }).catch(() => {});
+</script>
+</body>
+</html>
