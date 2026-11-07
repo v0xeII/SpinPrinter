@@ -1,7 +1,8 @@
 // Screenshots of every screen at one size, drawn by the real UI (ui.cpp) with a scripted user and
 // a fake Pi. Writes one PPM per screen into a folder; dev/make_shots.py puts them on one sheet.
 //   ./shots 320x170 out/          (also: round  = the round GC9A01 layout, axo = Spinny on the
-//   ./shots 240x240 round out/     main page instead of the card, en = English)
+//   ./shots 240x240 round out/     main page instead of the card, en = English,
+//                                  encoder / joystick = the hints for those controls)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -66,11 +67,14 @@ static void shot(const char* name) {
 
 int main(int argc, char** argv) {
   bool round = false, axo = false, en = false;
+  int input = 1;
   for (int i = 1; i < argc; i++) {
     if (sscanf(argv[i], "%dx%d", &W, &H) == 2) continue;
     if (!strcmp(argv[i], "round")) round = true;
     else if (!strcmp(argv[i], "axo")) axo = true;
     else if (!strcmp(argv[i], "en")) en = true;
+    else if (!strcmp(argv[i], "encoder")) input = 2;
+    else if (!strcmp(argv[i], "joystick")) input = 3;
     else dir = argv[i];
   }
   fb.assign(W * H, 0);
@@ -79,6 +83,7 @@ int main(int argc, char** argv) {
   UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove};
   Settings s{4.0f, en ? 1 : 0, 80, 16, 200, 6.f, 0, 1.0f, 1, axo ? HOME_AXO : HOME_CARD, 0};
   ui_set_panel(round ? "GC9A01" : "", round);
+  ui_set_input(input);
   ui_init(hal, s, 0);
   line("URL http://192.168.1.42");
   line("HOST spinslicer.local");

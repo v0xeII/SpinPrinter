@@ -44,4 +44,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs = 0);
 // Which screen (for the About page) and whether its glass is round (GC9A01): the round layout.
 // Call before ui_init(); without it the layout comes from the size alone.
 void ui_set_panel(const char* name, bool round);
+// Which controls the board has (1 buttons, 2 KY-040 encoder, 3 KY-023 joystick: hw.h IN_*). The hints on
+// the screen describe them, and with the encoder clockwise makes a value bigger while editing.
+void ui_set_input(int mode);
 void ui_stats(float frameMs, float kbPerFrame, float drawMs = -1);  // for the About screen

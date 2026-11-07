@@ -232,6 +232,7 @@ void setup() {
     UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove};
     const PanelInfo& p = hw_panel(HW.panel);
     ui_set_panel(p.name, p.round);
+    ui_set_input(HW.input);
     ui_init(hal, s, millis());
   }
   // the serial task runs either way: without a screen, CONFIG can still fix the settings

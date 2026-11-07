@@ -37,6 +37,9 @@ const TXT = {
     lost: "Плата не вернулась за 15 секунд. Нажми «Подключиться» и выбери порт снова.", err: "Плата не приняла настройки:",
     reset: "Сброшено к значениям из config.h, плата перезагружается.", noanswer: "Плата не отвечает. Это SpinScreen 0.8 или новее? Если нет, сначала прошей (шаг 1).",
     noscreen: "Плата работает, но экран не запустился: проверь тип экрана и пины.", busy: "Порт занят: закрой окно прошивки, Arduino IDE или SpinPi на этом компьютере.",
+    how: { buttons: "Вверх / вниз — по списку, OK — выбрать, долго держать OK — назад.",
+      encoder: "Крутить — по списку (по часовой — вниз, в правке значения — больше; быстро — крупный шаг), нажать — OK, долго держать — назад.",
+      joystick: "Вверх / вниз — по списку (держи — листает), вправо или нажать — OK, влево — назад. При включении ручку не трогать: запоминается центр." },
     screen: "Экран", input: "Управление", motor: "Мотор (драйвер STEP/DIR)", pi: "Raspberry Pi", usbOnly: "только USB-кабель", board: "ESP32-S3 Super Mini" },
   en: { connect: "Connect to the board", connected: "Board connected", noserial: "This browser has no Web Serial: open the page in Chrome or Edge on a computer.",
     read: "Read the board's settings.", saving: "Saving, the board will reboot…", waiting: "Waiting for the board to reboot…",
@@ -44,6 +47,9 @@ const TXT = {
     lost: "The board did not come back within 15 seconds. Press Connect and pick the port again.", err: "The board refused the settings:",
     reset: "Reset to config.h's values, the board is rebooting.", noanswer: "No answer. Is it SpinScreen 0.8 or newer? If not, flash it first (step 1).",
     noscreen: "The board runs but the screen did not start: check the screen type and pins.", busy: "The port is busy: close the flashing dialog, Arduino IDE or SpinPi on this computer.",
+    how: { buttons: "Up / down = the list, OK = choose, hold OK = back.",
+      encoder: "Turn = the list (clockwise = down; while editing = more; fast = big steps), press = OK, hold = back.",
+      joystick: "Up / down = the list (hold to scroll), right or press = OK, left = back. Leave the stick alone at power-up: it takes the centre then." },
     screen: "Screen", input: "Controls", motor: "Motor (STEP/DIR driver)", pi: "Raspberry Pi", usbOnly: "USB cable only", board: "ESP32-S3 Super Mini" },
 };
 const t = (k) => TXT[document.documentElement.lang === "en" ? "en" : "ru"][k];
@@ -200,6 +206,7 @@ function draw() {
   body += `<text x="${W - 20}" y="${y - 4}" font-size="12" text-anchor="end" fill="#a88f9b">${esc(t("board"))} · ${esc(P.size)}</text>`;
   $("cfg-wiring").innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${y + 6}" font-family="Onest, system-ui, sans-serif">${body}</svg>`;
   $("cfg-line").textContent = "CONFIG " + line();
+  $("cfg-how").textContent = t("how")[$("cfg-input").value];
 }
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
