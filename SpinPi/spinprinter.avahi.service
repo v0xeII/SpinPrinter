@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!-- SpinPrinter for SpinSlicer (mDNS). The installer puts this first copy in /etc/avahi/services;
+     spinpi.py then rewrites it with the printer's own name and id. -->
+<service-group>
+  <name replace-wildcards="yes">%h</name>
+  <service>
+    <type>_spinprinter._tcp</type>
+    <port>80</port>
+    <txt-record>name=SpinPrinter</txt-record>
+    <txt-record>api=1</txt-record>
+    <txt-record>path=/api/printer</txt-record>
+  </service>
+</service-group>

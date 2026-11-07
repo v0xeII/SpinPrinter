@@ -45,19 +45,46 @@ SpinPi and SpinProj by itself on the first start (10–20 minutes, needs interne
 
 ## Printing
 
-**From a USB stick (like OpenCAL):** put the MP4 on a stick, plug it into the Pi. On the printer
+**From SpinSlicer:** "Send to printer". The slicer finds the printer on the network (mDNS) and
+sends a `.spin` file: the one-turn video, a picture of the part and the planned turns in one file.
+
+**From a USB stick (like OpenCAL):** put the `.spin` or MP4 on a stick, plug it into the Pi. On the printer
 screen: **Print** → pick the video → check turns, exposure and pause → the pink **PRINT**. The stick
 is mounted read-only.
 
-**Over Wi-Fi:** open the printer page (QR or `http://spinslicer.local`), drop the video, press
-"Print". Uploaded videos show up in the list on the printer screen too. From SpinSlicer: Print →
-"to printer" → "Send to printer".
+**Over Wi-Fi:** open the printer page (QR or `http://spinslicer.local`), drop the `.spin` or video, press
+"Print". Uploaded files show up in the list on the printer screen too.
+
+### The `.spin` file
+One file per print: a plain stored (uncompressed) ZIP with `spin.json` (metadata), `video.mp4`,
+`preview.png` and `slicer.json` (the format: [docs/ecosystem.ru.md](../docs/ecosystem.ru.md)).
+The printer:
+- checks `spin.json` (format, version) and the video's SHA-256; a broken file is refused on
+  upload and shown with its error when it is on a stick;
+- unpacks the video once into `/var/lib/spinpi/spin/` (stick files too) and shows the preview on
+  the page and in the print sheet;
+- takes the turns and tolerance from `plan` (as before from the MP4 tag or `name.spin.json`), and
+  `frames_per_rev`, `frame0_angle_deg` and `rotation` from `video`;
+- if the video was sliced for the other turning direction than the vial really turns (printer
+  profile → "The vial turns"), it plays the frames backwards: the part comes out right, not mirrored;
+- warns when the file was sliced for another printer (`printer.profile_id`).
+
+Plain videos, `name.spin.json` beside them and JSON in the MP4 tag keep working.
+
+### Printer profile and print log
+The "Printer profile" card on the page holds what the slicer needs for its maths: network name,
+projector irradiance and contrast, vial diameter, wall and glass, motor gear and direction.
+Resolution, refresh, centering and vial width are filled in by themselves. Stored in
+`settings.json`, read by the slicer with `GET /api/printer`. The printer has a stable `id` (`spinpi-…`).
+
+The print log (`GET /api/history`) keeps the file, the plan, the turns really used, the exposure
+correction, the resin and the "how did it come out" answer, so the slicer can tune the resin's dose.
 
 ### Exposure without a camera
 OpenCAL plays the video until someone sees the part in a camera. Here the time is computed:
 
 1. **SpinSlicer** computes the dose from physics (resin absorption, projector irradiance, gel
-   dose) and stores the plan in the MP4 and in `name.spin.json` beside it.
+   dose) and stores the plan in the `.spin` file (or in the MP4 and in `name.spin.json` beside it).
 2. **The printer** turns it into a **whole number of turns**, so every angle gets the same dose.
    The light goes off exactly on the turn boundary.
 3. **Resin calibration, once:** SpinSlicer prints a "staircase" of 9 columns with different doses.
@@ -98,8 +125,12 @@ Keep resin out of the light!
 ## For developers: HTTP API
 | | |
 |---|---|
-| `PUT /api/files/<name>` | upload a video (body = the file): `curl -T print.mp4 http://spinslicer.local/api/files/print.mp4` |
-| `GET /api/files` | videos (`id`: `lib/…` uploaded, `usb/…` on a stick) with frames, fps, rpm |
+| `PUT /api/files/<name>` | upload a `.spin` or a video (body = the file): `curl -T part.spin http://spinslicer.local/api/files/part.spin`. Answer `{"ok":true,"name":…,"info":…}`; a broken `.spin` → 400 `{"ok":false,"error":…}` |
+| `GET /api/files` | the library (`id`: `lib/…` uploaded, `usb/…` on a stick): `format` (`spin`/`video`), frames, fps, rpm, `plan`, `plan_revs`, `tolerance_pct`, `rotation`, `frames_per_rev`, `frame0_angle_deg`, `reversed`, `other_printer`, `warnings`, `resin`, `preview`, `error` |
+| `GET /api/thumb?id=…` | the picture (PNG from the `.spin` or a JPEG frame of the video) |
+| `GET /api/printer` | printer profile: `id`, `name`, `projector` (`width`, `height`, `hz`, `irradiance_mw_cm2`, `contrast`), `vial` (`diameter_mm`, `wall_mm`, `n_glass`), `calibration` (`offset_px`, `center_offset_px`, `vial_width_px`), `motor` (`gear`, `direction`), `software`; unknown = `null` |
+| `POST /api/printer` `{"name":"Lab","vial_diameter_mm":25,"motor_dir":"cw_from_top"}` | edit the profile (also `irradiance_mw_cm2`, `contrast`, `vial_wall_mm`, `vial_n`, `motor_gear`; `null` = unknown) |
+| `GET /api/history` | `{"printer_id":…,"factor":…,"prints":[…]}`: every print with `file`, `plan`, `plan_revs`, `revs`, `factor`, `exposure_pct`, `resin`, `result` (under / ok / over / null), `factor_after` |
 | `POST /api/print` `{"id":"lib/print.mp4","revs":6,"factor":1.05,"delay_s":3}` | start (`revs` optional: plan × correction) |
 | `POST /api/plan` `{"id":…,"factor":1.05}` | turns and seconds it would take, dose deviation, warnings |
 | `POST /api/result` `{"result":"under"}` | how the last print came out: under / ok / over |
@@ -112,5 +143,11 @@ Keep resin out of the light!
 | `GET /api/wifi?scan=1`, `POST /api/wifi` `{"ssid":…,"psk":…}` | Wi-Fi (SpinOS only) |
 
 No password: everyone on your Wi-Fi sees the page. Fine for a home network.
+
+**mDNS:** the printer announces itself as `_spinprinter._tcp` (port 80) with TXT `name`, `id`, `api=1`,
+`path=/api/printer`. `spinpi.py` writes the service file `/etc/avahi/services/spinprinter.service`
+itself (the installer puts a first copy there). From a PC: `avahi-browse -rt _spinprinter._tcp`.
+
+**Tests without a Pi:** `python -m unittest discover tests` (Windows, Mac, Linux; no ESP, no ffmpeg needed).
 
 `fake_esp.py` pretends to be the ESP32; better is the [virtual ESP32](../SpinScreen_v0.7/sim/virtual_esp.cpp), the real screen UI in a window.

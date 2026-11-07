@@ -7,6 +7,11 @@ mkdir -p "$T/data"
 # things that must survive a reboot live on /data
 ln -snf /data/ssh "$T/root/.ssh"
 
+# mDNS for SpinSlicer: the root is read only, so avahi's service folder is a link into /run
+# (made by S01data), where spinpi.py writes spinprinter.service with the printer's name and id
+rm -rf "$T/etc/avahi/services"
+ln -snf /run/avahi-services "$T/etc/avahi/services"
+
 # dnsmasq only runs as the access point's DHCP/DNS, started by spinnet
 rm -f "$T/etc/init.d/S80dnsmasq"
 

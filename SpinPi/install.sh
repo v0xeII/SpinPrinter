@@ -17,6 +17,10 @@ echo "== 3/5 files -> /opt/spinpi"
 sudo mkdir -p /opt/spinpi /var/lib/spinpi
 sudo cp -r spinpi.py web /opt/spinpi/
 sudo install -m 755 ../SpinProj/spinproj /opt/spinpi/spinproj
+# mDNS: SpinSlicer finds the printer as _spinprinter._tcp (spinpi.py fills in its own name and id)
+sudo mkdir -p /etc/avahi/services
+[ -f /etc/avahi/services/spinprinter.service ] || sudo install -m 644 spinprinter.avahi.service /etc/avahi/services/spinprinter.service
+sudo systemctl enable --now avahi-daemon || true
 echo "== 4/5 no login text on the projector (tty1)"
 sudo systemctl disable --now getty@tty1.service || true
 echo "== 5/5 service"
