@@ -9,7 +9,7 @@ struct MotorConfig {
   bool dirInvert;
 };
 
-void motor_init(const MotorConfig& cfg);
+void motor_init(const MotorConfig& cfg, int stepPin, int dirPin, int enPin);  // enPin -1: EN tied to GND
 void motor_config(const MotorConfig& cfg);  // safe to call while running
 void motor_set(bool on, float rpm);         // rpm of the vial
 float motor_rpm();                          // current vial rpm (while ramping)

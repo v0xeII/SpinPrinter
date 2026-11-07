@@ -33,6 +33,20 @@ esp-web-install-button button:hover,.btn:hover{background:var(--hot)}
 img.wiring{width:100%;height:auto;border-radius:14px;border:1px solid var(--line)}
 a{color:var(--pink)}
 footer{color:var(--dim);font-size:13px;text-align:center;margin-top:28px}
+.btn:disabled{opacity:.45;cursor:default;background:var(--pink)}
+.btn.ghost{background:transparent;color:var(--pink);border:1px solid var(--line)}
+.cfg{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px 16px;margin:18px 0}
+.cfg label{display:flex;flex-direction:column;gap:5px;color:var(--dim);font-size:13px;font-weight:600}
+.cfg label.chk{flex-direction:row;align-items:center;gap:8px;align-self:end;padding-bottom:10px}
+.cfg select,.cfg input:not([type=checkbox]){font:15px var(--font);color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+.cfg details{grid-column:1/-1}
+.cfg summary,summary{cursor:pointer;color:var(--dim);font-weight:600}
+.pins{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px 12px;margin-top:10px}
+.pins input{width:100%}
+.wiring-live svg{width:100%;height:auto;border-radius:14px;border:1px solid var(--line);background:var(--bg)}
+.okmsg{border-left:3px solid var(--pink);padding:8px 14px;background:var(--dark);border-radius:0 12px 12px 0}
+#cfg-msg:empty{display:none}
+pre#cfg-log{max-height:180px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px;color:var(--dim);white-space:pre-wrap}
 [data-l]{display:none} html[lang=ru] [data-l=ru], html[lang=en] [data-l=en]{display:revert}
 </style>
 </head>
@@ -55,12 +69,54 @@ footer{color:var(--dim);font-size:13px;text-align:center;margin-top:28px}
       <span slot="not-allowed"><p class="warn"><span data-l="ru">Нужна защищённая страница (https).</span><span data-l="en">The page must be served over https.</span></p></span>
     </esp-web-install-button>
     <p class="dim" id="ver"></p>
-    <p class="warn"><span data-l="ru">Порт не появляется? Кабель «только для зарядки» — возьми другой. Не прошивается? Зажми BOOT, нажми и отпусти RESET, отпусти BOOT и попробуй снова. Настройки платы (скорость, язык, аксолотль) при прошивке сохраняются.</span>
-      <span data-l="en">No port in the list? The cable only charges: try another one. Flashing fails? Hold BOOT, press and release RESET, release BOOT and try again. The board's settings (speed, language, axolotl) are kept.</span></p>
+    <p class="warn"><span data-l="ru">Порт не появляется? Кабель «только для зарядки» — возьми другой. Не прошивается? Зажми BOOT, нажми и отпусти RESET, отпусти BOOT и попробуй снова. Настройки платы (экран, скорость, язык, аксолотль) при прошивке сохраняются. После прошивки: шаг 2.</span>
+      <span data-l="en">No port in the list? The cable only charges: try another one. Flashing fails? Hold BOOT, press and release RESET, release BOOT and try again. The board's settings (screen, speed, language, axolotl) are kept. After flashing: step 2.</span></p>
+  </section>
+
+  <section class="card" id="screen">
+    <h2><span data-l="ru">2 · Какой у тебя экран и как подключён</span><span data-l="en">2 · Which screen, and how it is wired</span></h2>
+    <p data-l="ru">Одна прошивка для всех экранов: ST7789 (1.9", 1.3", 2.4"), ILI9341, ST7735 и круглый GC9A01. Выбери свой, проверь провода по схеме и запиши настройки в плату. Перепрошивать не нужно, вернуться сюда можно в любой момент.</p>
+    <p data-l="en">One firmware for every screen: ST7789 (1.9", 1.3", 2.4"), ILI9341, ST7735 and the round GC9A01. Pick yours, check the wires against the picture and store the settings on the board. No flashing needed, come back any time.</p>
+    <div class="step"><b class="n">1</b><div data-l="ru">Закрой окно прошивки (если открыто) и нажми «Подключиться». Плата покажет, что в ней записано сейчас.</div>
+      <div data-l="en">Close the flashing dialog (if open) and press Connect. The board shows what it has stored now.</div></div>
+    <button class="btn" id="cfg-connect"></button>
+    <form id="cfg-form" class="cfg" onsubmit="return false">
+      <label><span data-l="ru">Экран</span><span data-l="en">Screen</span><select id="cfg-panel"></select></label>
+      <label><span data-l="ru">Управление</span><span data-l="en">Controls</span><select id="cfg-input">
+        <option value="buttons">3 кнопки / 3 buttons</option><option value="encoder">крутилка KY-040 / KY-040 encoder</option><option value="joystick">джойстик KY-023 / KY-023 joystick</option></select></label>
+      <label><span data-l="ru">Пины</span><span data-l="en">Pins</span><select id="cfg-layout">
+        <option value="wires">на проводах (как на схеме ниже) / on wires (as in the diagram)</option>
+        <option value="breadboard">на макетке рядом с платой / on a breadboard next to the board</option>
+        <option value="custom">свои / my own</option></select></label>
+      <label><span data-l="ru">Поворот</span><span data-l="en">Rotation</span><select id="cfg-rot"><option value="0">0°</option><option value="180">180°</option></select></label>
+      <label><span data-l="ru">SPI, МГц</span><span data-l="en">SPI, MHz</span><input id="cfg-spi" type="number" min="1" max="80" value="40"></label>
+      <label class="chk"><input id="cfg-nocs" type="checkbox"><span data-l="ru">у экрана нет вывода CS</span><span data-l="en">the screen has no CS pin</span></label>
+      <details><summary><span data-l="ru">Номера пинов (GPIO)</span><span data-l="en">Pin numbers (GPIO)</span></summary>
+        <div class="pins">
+          <label>SCL<input id="pin-scl"></label><label>SDA<input id="pin-sda"></label><label>RES<input id="pin-res"></label>
+          <label>DC<input id="pin-dc"></label><label>CS<input id="pin-cs"></label><label>BLK<input id="pin-blk"></label>
+          <label>UP / CLK / VRx<input id="pin-a"></label><label>DOWN / DT / VRy<input id="pin-b"></label><label>OK / SW<input id="pin-c"></label>
+          <label>STEP<input id="pin-step"></label><label>DIR<input id="pin-dir"></label><label>EN<input id="pin-en"></label>
+          <label>Pi RX<input id="pin-pi_rx"></label><label>Pi TX<input id="pin-pi_tx"></label>
+        </div>
+        <p class="dim"><span data-l="ru">−1 = не подключён (RES, CS, BLK, EN, Pi RX/TX).</span><span data-l="en">−1 = not connected (RES, CS, BLK, EN, Pi RX/TX).</span></p>
+      </details>
+    </form>
+    <div class="step"><b class="n">2</b><div data-l="ru">Соедини так (питание экрана и джойстика: <b>3V3, не 5V</b>):</div>
+      <div data-l="en">Wire it like this (power for the screen and the joystick: <b>3V3, not 5V</b>):</div></div>
+    <div id="cfg-wiring" class="wiring-live"></div>
+    <div class="step"><b class="n">3</b><div data-l="ru">Нажми «Записать». Плата проверит настройки, запомнит их, перезагрузится, и эта страница убедится, что она работает с ними.</div>
+      <div data-l="en">Press Save. The board checks the settings, stores them, reboots, and this page makes sure it runs with them.</div></div>
+    <button class="btn" id="cfg-save"><span data-l="ru">Записать в плату</span><span data-l="en">Save to the board</span></button>
+    <button class="btn ghost" id="cfg-reset"><span data-l="ru">Сбросить</span><span data-l="en">Reset</span></button>
+    <p id="cfg-msg"></p>
+    <details><summary class="dim"><span data-l="ru">Что уходит в плату</span><span data-l="en">What goes to the board</span></summary>
+      <p><code id="cfg-line"></code></p>
+      <pre id="cfg-log"></pre></details>
   </section>
 
   <section class="card">
-    <h2><span data-l="ru">2 · Raspberry Pi</span><span data-l="en">2 · Raspberry Pi</span></h2>
+    <h2><span data-l="ru">3 · Raspberry Pi</span><span data-l="en">3 · Raspberry Pi</span></h2>
     <div class="step"><b class="n">1</b><div data-l="ru"><a href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a> → твоя Pi (3, 4, 5, Zero 2 W) → <b>Raspberry Pi OS Lite (64-bit)</b> → настройки: имя <code>spinslicer</code>, пользователь и пароль, твой Wi-Fi, включить SSH → записать.</div>
       <div data-l="en"><a href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a> → your Pi (3, 4, 5, Zero 2 W) → <b>Raspberry Pi OS Lite (64-bit)</b> → settings: hostname <code>spinslicer</code>, user and password, your Wi-Fi, enable SSH → write.</div></div>
     <div class="step"><b class="n">2</b><div data-l="ru">Карту в Pi, свой блок питания (Pi 3: 5 В 2,5 А, Pi 4: 3 А, Pi 5: 5 А), подожди 3 минуты. На компьютере (Windows: PowerShell): <code>ssh имя@spinslicer.local</code></div>
@@ -71,7 +127,7 @@ footer{color:var(--dim);font-size:13px;text-align:center;margin-top:28px}
   </section>
 
   <section class="card">
-    <h2><span data-l="ru">3 · Как соединить</span><span data-l="en">3 · Wiring</span></h2>
+    <h2><span data-l="ru">4 · Как соединить</span><span data-l="en">4 · Wiring</span></h2>
     <p data-l="ru">ESP32 и Pi: <b>USB-кабель</b> или <b>4 провода</b> (TX и RX накрест). Работает и так, и так, ничего переключать не надо.</p>
     <p data-l="en">ESP32 and Pi: a <b>USB cable</b> or <b>4 wires</b> (TX and RX crossed). Either works, nothing to switch.</p>
     <img class="wiring" data-l="en" src="wiring.svg" alt="SpinPrinter wiring">
@@ -89,5 +145,6 @@ document.getElementById("lang").onclick = () => { lang = lang === "ru" ? "en" : 
 apply();
 fetch("manifest.json").then(r => r.json()).then(m => { document.getElementById("ver").textContent = "SpinScreen " + m.version; }).catch(() => {});
 </script>
+<script src="screen.js"></script>
 </body>
 </html>
