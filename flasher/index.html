@@ -61,10 +61,10 @@ footer{color:var(--dim);font-size:13px;text-align:center;margin-top:28px}
 
   <section class="card">
     <h2><span data-l="ru">2 · Raspberry Pi</span><span data-l="en">2 · Raspberry Pi</span></h2>
-    <div class="step"><b class="n">1</b><div data-l="ru"><a href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a> → Raspberry Pi 3 → <b>Raspberry Pi OS Lite (64-bit)</b> → настройки: имя <code>spinslicer</code>, пользователь и пароль, твой Wi-Fi, включить SSH → записать.</div>
-      <div data-l="en"><a href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a> → Raspberry Pi 3 → <b>Raspberry Pi OS Lite (64-bit)</b> → settings: hostname <code>spinslicer</code>, user and password, your Wi-Fi, enable SSH → write.</div></div>
-    <div class="step"><b class="n">2</b><div data-l="ru">Карту в Pi, питание <b>5 В 2,5 А</b>, подожди 3 минуты. На компьютере (Windows: PowerShell): <code>ssh имя@spinslicer.local</code></div>
-      <div data-l="en">Card into the Pi, a <b>5 V 2.5 A</b> power supply, wait 3 minutes. On the computer (Windows: PowerShell): <code>ssh user@spinslicer.local</code></div></div>
+    <div class="step"><b class="n">1</b><div data-l="ru"><a href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a> → твоя Pi (3, 4, 5, Zero 2 W) → <b>Raspberry Pi OS Lite (64-bit)</b> → настройки: имя <code>spinslicer</code>, пользователь и пароль, твой Wi-Fi, включить SSH → записать.</div>
+      <div data-l="en"><a href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a> → your Pi (3, 4, 5, Zero 2 W) → <b>Raspberry Pi OS Lite (64-bit)</b> → settings: hostname <code>spinslicer</code>, user and password, your Wi-Fi, enable SSH → write.</div></div>
+    <div class="step"><b class="n">2</b><div data-l="ru">Карту в Pi, свой блок питания (Pi 3: 5 В 2,5 А, Pi 4: 3 А, Pi 5: 5 А), подожди 3 минуты. На компьютере (Windows: PowerShell): <code>ssh имя@spinslicer.local</code></div>
+      <div data-l="en">Card into the Pi, its own power supply (Pi 3: 5 V 2.5 A, Pi 4: 3 A, Pi 5: 5 A), wait 3 minutes. On the computer (Windows: PowerShell): <code>ssh user@spinslicer.local</code></div></div>
     <div class="step"><b class="n">3</b><div><span data-l="ru">На Pi одна команда (10–20 минут, потом Pi перезагрузится):</span><span data-l="en">One command on the Pi (10–20 minutes, then the Pi reboots):</span><br>
       <code>curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash</code></div></div>
     <p class="dim"><span data-l="ru">Есть Linux? Всё то же одной командой с компьютера: <code>sudo bash SpinPi/make_sd_card.sh</code></span><span data-l="en">On Linux the same is one command on the computer: <code>sudo bash SpinPi/make_sd_card.sh</code></span></p>

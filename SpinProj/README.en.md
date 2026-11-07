@@ -34,7 +34,7 @@ make NO_SDL=1        # on the Pi
 ```
 Needs gcc, make, liblz4 (Raspberry Pi OS: `sudo apt install liblz4-dev libdrm-dev`).
 
-## Measuring on a Pi 3B
+## Measuring on the Pi
 
 Stop the SpinPi service, connect a projector or monitor over HDMI:
 ```bash
@@ -45,7 +45,7 @@ It shows the memory for one turn, how many such frames fit in RAM, the milliseco
 frame, how even the vsyncs are and how many were missed. The last line `RESULT …` has all the numbers.
 
 **Numbers from a PC say nothing about the Pi.** On the development PC a 1280×800 frame takes
-1.5–3 ms; on a Pi 3B it will be some times slower. Only measuring tells how much.
+1.5–3 ms; on a Pi it will be slower (a Pi 3 more than a Pi 5). Only measuring tells how much.
 
 ## Commands (stdin → SpinProj)
 

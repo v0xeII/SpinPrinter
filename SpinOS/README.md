@@ -1,4 +1,4 @@
-# SpinOS: свой образ системы для принтера (Raspberry Pi 3B)
+# SpinOS: свой образ системы для принтера (пока Raspberry Pi 3)
 
 **Русский** · [English](README.en.md)
 

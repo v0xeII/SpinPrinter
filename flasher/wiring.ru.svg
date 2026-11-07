@@ -16,10 +16,10 @@
   <text x="40" y="52" font-size="30" font-weight="800" fill="#ff8db5">SpinPrinter</text>
   <text x="232" y="52" font-size="20" font-weight="600" fill="#a88f9b">схема подключения</text>
 
-  <!-- ============ Raspberry Pi 3B ============ -->
+  <!-- ============ Raspberry Pi (any 40-pin model) ============ -->
   <rect x="40" y="130" width="440" height="300" rx="18" fill="url(#board)" stroke="#2a2029" stroke-width="2"/>
-  <text x="70" y="250" font-size="24" font-weight="800" fill="#f7e3ec">Raspberry Pi 3B</text>
-  <text x="70" y="276" font-size="15" fill="#a88f9b">гребёнка на 40 пинов, вид сверху</text>
+  <text x="70" y="250" font-size="24" font-weight="800" fill="#f7e3ec">Raspberry Pi</text>
+  <text x="70" y="276" font-size="15" fill="#a88f9b">Pi 3 · 4 · 5 · Zero 2 W: гребёнка одна и та же</text>
   
   <!-- SD card end / USB end -->
   <rect x="28" y="236" width="14" height="70" rx="3" fill="#2a2029"/>
@@ -33,11 +33,11 @@
   <text x="446" y="152" font-size="13" fill="#a88f9b" text-anchor="end">USB</text>
   <!-- power + HDMI on the bottom edge -->
   <rect x="96" y="420" width="34" height="18" rx="4" fill="#2a2029" stroke="#4a3b44"/>
-  <rect x="210" y="420" width="62" height="20" rx="4" fill="#2a2029" stroke="#4a3b44"/>
-  <text x="113" y="466" font-size="14" fill="#f7e3ec" text-anchor="middle">micro-USB</text>
-  <text x="113" y="484" font-size="13" fill="#a88f9b" text-anchor="middle">5 V 2.5 A</text>
-  <text x="241" y="466" font-size="14" fill="#f7e3ec" text-anchor="middle">HDMI</text>
-  <text x="241" y="484" font-size="13" fill="#a88f9b" text-anchor="middle">→ проектор</text>
+  <rect x="300" y="420" width="62" height="20" rx="4" fill="#2a2029" stroke="#4a3b44"/>
+  <text x="113" y="466" font-size="14" fill="#f7e3ec" text-anchor="middle">питание</text>
+  <text x="113" y="484" font-size="13" fill="#a88f9b" text-anchor="middle">5 В, 2,5–5 А по модели</text>
+  <text x="331" y="466" font-size="14" fill="#f7e3ec" text-anchor="middle">HDMI</text>
+  <text x="331" y="484" font-size="13" fill="#a88f9b" text-anchor="middle">→ проектор (micro-HDMI у Pi 4/5)</text>
 
   <!-- the header: pin k sits in column (k-1)/2; even pins = outer row (board edge), odd = inner -->
   <rect x="62" y="134" width="392" height="54" rx="6" fill="#0a080b" stroke="#2a2029"/>

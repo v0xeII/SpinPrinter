@@ -33,7 +33,7 @@ It finds the card, asks you to type "yes" and your Wi-Fi, wipes the card, writes
 SpinPi and SpinProj by itself on the first start (10–20 minutes, needs internet).
 
 **Any OS:**
-1. **Raspberry Pi Imager** → Raspberry Pi 3 → **Raspberry Pi OS Lite (64-bit)** → settings: hostname
+1. **Raspberry Pi Imager** → your Pi model → **Raspberry Pi OS Lite (64-bit)** → settings: hostname
    **spinslicer**, a user and password, your Wi-Fi, **SSH on**. Write, put the card in the Pi, power on, wait 3 minutes.
 2. Log in from the computer (Windows: PowerShell): `ssh user@spinslicer.local`
 3. One command on the Pi (10–20 minutes, then it reboots; run again to update):

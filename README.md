@@ -8,7 +8,7 @@ This repository is everything the printer itself needs: the screen and motor fir
 Raspberry Pi software, the angle-locked projector and a system image.
 
 ```
- SpinSlicer / phone ──Wi-Fi──► Raspberry Pi 3B ──HDMI──► projector
+ SpinSlicer / phone ──Wi-Fi──► Raspberry Pi ──HDMI──► projector
                                    │
                                    └──USB or 4 wires──► ESP32-S3 (screen, buttons, motor)
 ```
@@ -50,8 +50,11 @@ firmware listens on both and the Pi looks for the ESP on USB first, then on the 
 | pin 8 · GPIO14 TX | **RX** (GPIO44) |
 | pin 10 · GPIO15 RX | **TX** (GPIO43) |
 
-TX and RX **cross**. Both boards are 3.3 V, no level shifter. Power the Pi from a **5 V 2.5 A**
-supply, or it reports "Undervoltage" and misbehaves.
+TX and RX **cross**. Both boards are 3.3 V, no level shifter. The header is the same on every
+40-pin Pi. Power the Pi with the supply for its model, or it reports "Undervoltage" and misbehaves.
+
+**Any 64-bit Raspberry Pi works:** Pi 3, 3B+, 4, 400, 5, Zero 2 W. Power and HDMI per model:
+[docs/INSTALL.md](docs/INSTALL.md#which-raspberry-pi).
 
 ## Printing from SpinSlicer over Wi-Fi
 
@@ -67,7 +70,7 @@ from any device on the same network, or bring it on a USB stick.
 | [`SpinScreen_v0.7/`](SpinScreen_v0.7/README.en.md) | ESP32-S3 firmware: ST7789 screen, buttons, stepper motor, Spinny the axolotl |
 | [`SpinPi/`](SpinPi/README.en.md) | the Pi software: printer web page, USB sticks, print jobs, ESP32 link, installers |
 | [`SpinProj/`](SpinProj/README.en.md) | the projector: the frame for the vial angle on every vsync (C, DRM/KMS) |
-| [`SpinOS/`](SpinOS/README.en.md) | a dedicated Pi 3B system image (Buildroot), not yet tried on hardware |
+| [`SpinOS/`](SpinOS/README.en.md) | a dedicated system image (Buildroot, Pi 3 for now), not yet tried on hardware |
 | [`flasher/`](flasher/index.html) | the browser flasher page (published on GitHub Pages) |
 | [`dev/`](#the-whole-printer-on-a-pc) | the whole printer on a PC without hardware + a self-test |
 | [`docs/plan.md`](docs/plan.md) | the project's first plan (touch panel, `.spincal` jobs), in Russian; `firmware/`, `pi/`, `system/`, `tests/` are its empty skeleton |
@@ -100,4 +103,4 @@ light must go off at once. In the test video the arrow in the corner points wher
 | ✔ real ESP32 | firmware 0.7.2 on the board; SpinPi on a PC + the board over USB: no missed frames, 0.5 ms angle jitter |
 | ✔ SpinSlicer → printer | lossless video + plan → SpinPi on a PC → the print started by itself and ran to plan |
 | ✔ Buildroot | SpinOS settings accepted by Buildroot 2026.02.3, SpinProj builds for the Pi (aarch64) |
-| ✘ not yet | on a Pi 3B: projector output (DRM), speed, installation, the TX/RX wire link, the motor |
+| ✘ not yet | on a real Pi: projector output (DRM), speed, installation, the TX/RX wire link, the motor |

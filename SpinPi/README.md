@@ -37,7 +37,7 @@ sudo bash SpinPi/make_sd_card.sh
 
 ### 1. Записать систему на карту
 1. Поставь **Raspberry Pi Imager** на компьютер (raspberrypi.com/software).
-2. Устройство: **Raspberry Pi 3**. Система: **Raspberry Pi OS Lite (64-bit)** (Other → Lite).
+2. Устройство: **твоя модель Pi** (3, 3B+, 4, 5, Zero 2 W). Система: **Raspberry Pi OS Lite (64-bit)** (Other → Lite).
 3. Нажми «Изменить настройки» (шестерёнка) и заполни:
    - имя хоста: **spinslicer**
    - имя пользователя и пароль (запомни!)

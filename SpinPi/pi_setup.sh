@@ -1,8 +1,8 @@
 #!/bin/bash
 # Raspberry Pi OS settings for the printer (idempotent; used by get.sh, needs a reboot):
 #   * the projector stays black: no rainbow splash, no boot text, no blinking cursor
-#   * GPIO14/15 (pins 8, 10) are the three-wire link to the ESP32: the PL011 UART goes there,
-#     Bluetooth is off, no Linux console or login on it
+#   * GPIO14/15 (pins 8, 10) are the three-wire link to the ESP32: the PL011 UART goes there
+#     (Pi 3/4/Zero 2 W: Bluetooth off; Pi 5: uart0 on), no Linux console or login on it
 #   * CPU 3 is kept free for SpinProj (isolcpus=3)
 set -euo pipefail
 BOOT=/boot/firmware
@@ -31,6 +31,10 @@ boot_delay=0
 dtparam=audio=off
 enable_uart=1
 dtoverlay=disable-bt
+[pi5]
+# Pi 5: GPIO14/15 are UART0 (/dev/ttyAMA0); /dev/serial0 there is the debug connector
+dtparam=uart0=on
+[all]
 CFGEOF
 fi
 for unit in serial-getty@ttyAMA0 serial-getty@serial0 serial-getty@ttyS0 hciuart; do

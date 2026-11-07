@@ -79,8 +79,12 @@ class Esp:
         usb = sorted(glob.glob("/dev/serial/by-id/*Espressif*"))
         real = {os.path.realpath(p) for p in usb}
         usb += [p for p in sorted(glob.glob("/dev/ttyACM*")) if os.path.realpath(p) not in real]
-        # Raspberry Pi GPIO14/15: /dev/serial0 on Raspberry Pi OS, ttyAMA0 itself on SpinOS
-        wires = next(([p] for p in ("/dev/serial0", "/dev/ttyAMA0") if os.path.exists(p)), [])
+        # Raspberry Pi GPIO14/15: /dev/serial0 on Pi 3/4/Zero 2 W with Raspberry Pi OS; ttyAMA0 on
+        # SpinOS and on a Pi 5 (where serial0 is the debug connector). Each real port once.
+        wires = []
+        for p in ("/dev/serial0", "/dev/ttyAMA0"):
+            if os.path.exists(p) and os.path.realpath(p) not in {os.path.realpath(w) for w in wires + usb}:
+                wires.append(p)
         return usb + wires
 
     def _find_port(self):

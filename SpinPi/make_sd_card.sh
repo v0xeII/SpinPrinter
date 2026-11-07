@@ -178,6 +178,10 @@ dtparam=audio=off
 # The good UART (PL011, /dev/serial0) goes to those pins; Bluetooth is not used.
 enable_uart=1
 dtoverlay=disable-bt
+[pi5]
+# Pi 5: GPIO14/15 are UART0 (/dev/ttyAMA0); /dev/serial0 there is the debug connector
+dtparam=uart0=on
+[all]
 EOF
 # nothing on the wires to the ESP32. NOT getty@tty1: Raspberry Pi OS switches it back on while
 # cloud-init creates the user, and with it masked the user was never made (the "Please enter new
@@ -240,7 +244,8 @@ echo
 echo "  1. Вставь карту в Raspberry Pi."
 echo "  2. ESP32 с экраном подключи к Pi USB-кабелем (любой USB-порт Pi)."
 [ -n "$SSID" ] || echo "     И сетевой кабель от роутера в Pi: без Wi-Fi ей нужен интернет по кабелю."
-echo "  3. Включи питание Pi (блок 5 В 2,5 А, не от компьютера). Первый запуск: 10–20 минут"
+echo "  3. Включи питание Pi (свой блок: Pi 3 и Zero 2 W — 5 В 2,5 А, Pi 4 — 3 А, Pi 5 — 5 А)."
+echo "     Первый запуск: 10–20 минут"
 echo "     (Pi сама скачает и поставит программы). Не выключай её всё это время."
 echo "  4. Когда на экране ESP появится «Pi на связи», открой  http://spinslicer.local"
 echo

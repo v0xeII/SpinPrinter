@@ -1,4 +1,4 @@
-# SpinOS: a dedicated system image for the printer (Raspberry Pi 3B)
+# SpinOS: a dedicated system image for the printer (Raspberry Pi 3 for now)
 
 [Русский](README.md) · **English**
 
