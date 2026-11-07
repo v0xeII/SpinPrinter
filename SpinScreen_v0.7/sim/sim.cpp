@@ -66,16 +66,8 @@ static void hMove(double deg, float rpm) { moveLeft = (float)deg; tgtRpm = rpm; 
 
 int main(int argc, char** argv) {
   int W = 320, H = 170;
-  bool round = false;  // --round: the round GC9A01 layout (with --size=240x240)
-  for (int i = 1; i < argc; i++) {
+  for (int i = 1; i < argc; i++)
     if (!strncmp(argv[i], "--size=", 7)) sscanf(argv[i] + 7, "%dx%d", &W, &H);
-    if (!strcmp(argv[i], "--round")) round = true;
-  }
-  ui_set_panel(round ? "GC9A01" : "", round);
-  for (int i = 1; i < argc; i++) {  // --input=buttons|encoder|joystick: the hints for those controls
-    if (!strcmp(argv[i], "--input=encoder")) ui_set_input(2);
-    if (!strcmp(argv[i], "--input=joystick")) ui_set_input(3);
-  }
   std::vector<uint16_t> fb(W * H);
   Canvas c(W, H, fb.data());
   UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove};

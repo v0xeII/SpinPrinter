@@ -30,14 +30,18 @@ static volatile float target = 0, current = 0;
 static volatile bool wantOn = false;
 static bool dirState = false;  // current DIR pin level
 
-// pins from hw.h; STEP is toggled by writing the GPIO set / clear register straight from the
-// timer interrupt (GPIO 0..31 and 32..48 have a register each)
-static int pinStep = 1, pinDir = 2, pinEn = -1;
-static DRAM_ATTR uint32_t stepSet, stepClr, stepMask;
-static inline void stepPin(bool on) { REG_WRITE(on ? stepSet : stepClr, stepMask); }
-// driver enable (LOW = on); en -1: no pin, the driver's EN is tied to GND
+// driver enable (LOW = on); PIN_EN -1: no pin, the driver's EN is tied to GND
 static inline void enPin(int lvl) {
-  if (pinEn >= 0) digitalWrite(pinEn, lvl);
+#if PIN_EN >= 0
+  digitalWrite(PIN_EN, lvl);
+#else
+  (void)lvl;
+#endif
+}
+
+static inline void stepPin(bool on) {
+  if (on) REG_WRITE(GPIO_OUT_W1TS_REG, 1u << PIN_STEP);
+  else REG_WRITE(GPIO_OUT_W1TC_REG, 1u << PIN_STEP);
 }
 
 static bool IRAM_ATTR onAlarm(gptimer_handle_t t, const gptimer_alarm_event_data_t* e, void*) {
@@ -96,7 +100,7 @@ static void ramp(void*) {
   current = cur;
   if (cur == 0 && wantDir != dirState) {
     dirState = wantDir;
-    digitalWrite(pinDir, dirState ? HIGH : LOW);
+    digitalWrite(PIN_DIR, dirState ? HIGH : LOW);
     dirSign = dirState ? -1 : 1;
   }
   float stepHz = cur / 60.f * microPerVialRev();
@@ -111,22 +115,18 @@ static void ramp(void*) {
   halfFP = (uint64_t)(half * 65536.0);
 }
 
-void motor_init(const MotorConfig& cfg, int step, int dir, int en) {
+void motor_init(const MotorConfig& cfg) {
   C = cfg;
-  pinStep = step;
-  pinDir = dir;
-  pinEn = en;
-  stepSet = step < 32 ? GPIO_OUT_W1TS_REG : GPIO_OUT1_W1TS_REG;
-  stepClr = step < 32 ? GPIO_OUT_W1TC_REG : GPIO_OUT1_W1TC_REG;
-  stepMask = 1u << (step & 31);
-  if (pinEn >= 0) pinMode(pinEn, OUTPUT);
+#if PIN_EN >= 0
+  pinMode(PIN_EN, OUTPUT);
+#endif
   enPin(HIGH);
-  pinMode(pinDir, OUTPUT);
+  pinMode(PIN_DIR, OUTPUT);
   dirState = C.dirInvert;
   dirSign = dirState ? -1 : 1;
-  digitalWrite(pinDir, dirState ? HIGH : LOW);
-  pinMode(pinStep, OUTPUT);
-  digitalWrite(pinStep, LOW);
+  digitalWrite(PIN_DIR, dirState ? HIGH : LOW);
+  pinMode(PIN_STEP, OUTPUT);
+  digitalWrite(PIN_STEP, LOW);
 
   gptimer_config_t tc = {};
   tc.clk_src = GPTIMER_CLK_SRC_DEFAULT;
