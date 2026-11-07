@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a080b">
+<title>SpinSlicer Printer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a080b; --panel:#151016; --panel2:#1c151e; --line:#2a2029; --text:#f7e3ec; --dim:#a88f9b; --faint:#5c4a55;
+  --pink:#ff8db5; --hot:#ff4f9a; --dark:#170910; --ok:#ff8db5; --warn:#ffb86b;
+  --r:20px; --font:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;background:
+  radial-gradient(900px 500px at 85% -10%,rgba(255,79,154,.16),transparent 60%),
+  radial-gradient(700px 400px at -10% 30%,rgba(255,141,181,.07),transparent 60%),var(--bg)}
+.wrap{max-width:980px;margin:0 auto;padding:20px 16px 60px}
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:22px}
+.brand{display:flex;align-items:center;gap:12px;flex:1;min-width:220px}
+.brand svg{width:86px;height:46px;flex:none}
+.brand h1{font-size:24px;font-weight:800;letter-spacing:-.5px;margin:0;color:var(--pink)}
+.brand small{display:block;color:var(--dim);font-size:13px;font-weight:500;margin-top:2px}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{display:flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line);border-radius:99px;
+  padding:6px 12px;font-size:13px;color:var(--dim);white-space:nowrap}
+.chip i{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.chip.on{color:var(--text)} .chip.on i{background:var(--pink);box-shadow:0 0 10px var(--hot)}
+.lang{cursor:pointer;user-select:none}
+.grid{display:grid;grid-template-columns:1.25fr 1fr;gap:16px}
+@media (max-width:820px){.grid{grid-template-columns:1fr}}
+.grid>*{min-width:0}
+html,body{overflow-x:hidden}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);font-weight:600;margin:0 0 14px}
+.span2{grid-column:1/-1}
+/* hero */
+.hero{display:flex;gap:22px;align-items:center;min-height:210px}
+@media (max-width:520px){.hero{flex-direction:column;text-align:center}}
+.ring{position:relative;width:180px;height:180px;flex:none}
+.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring .mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring .big{font-size:38px;font-weight:800;letter-spacing:-1px}
+.ring .sub{font-size:12px;color:var(--dim)}
+.hero .info{flex:1;min-width:0}
+.state{font-size:28px;font-weight:800;letter-spacing:-.5px;margin:0 0 6px}
+.meta{color:var(--dim);font-size:14px;line-height:1.6;word-break:break-word}
+.meta b{color:var(--text);font-weight:600}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center}
+@media (max-width:520px){.row{justify-content:center}}
+button,.btn{font-family:var(--font);font-size:15px;font-weight:700;border:0;border-radius:14px;padding:12px 18px;cursor:pointer;
+  transition:transform .12s ease,background .2s,opacity .2s;color:var(--dark);background:var(--pink)}
+button:active{transform:scale(.97)}
+button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+button.ghost:hover{border-color:var(--faint)}
+button.danger{background:#2a1119;color:#ff9db8;border:1px solid #4a1f2d}
+button.big{font-size:17px;padding:15px 26px;border-radius:16px}
+button:disabled{opacity:.35;cursor:not-allowed}
+/* drop */
+.drop{display:block;border:1.5px dashed var(--faint);border-radius:18px;padding:26px 16px;text-align:center;cursor:pointer;transition:.2s;position:relative;overflow:hidden}
+.drop:hover,.drop.over{border-color:var(--pink);background:rgba(255,141,181,.05)}
+.drop b{display:block;font-size:17px;margin-bottom:4px}
+.drop span{color:var(--dim);font-size:13px}
+.bar{height:6px;border-radius:9px;background:var(--line);overflow:hidden;margin-top:14px;display:none}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--hot),var(--pink));transition:width .2s}
+/* files */
+.files{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.file{display:flex;gap:12px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:10px}
+.file.sel{border-color:var(--pink);box-shadow:0 0 0 1px var(--pink) inset}
+.file img{width:72px;height:45px;object-fit:cover;border-radius:10px;background:#000;flex:none}
+.file .t{flex:1;min-width:0}
+.file .n{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file .d{color:var(--dim);font-size:12px;margin-top:2px}
+.file button{padding:9px 13px;font-size:13px;border-radius:12px}
+.badge{font-size:11px;font-weight:700;color:var(--dark);background:var(--pink);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:2px}
+.check{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:14px;margin:6px 0}
+.check input{accent-color:var(--pink);width:18px;height:18px}
+.cal{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.cal .field input[type=range]{flex:1}
+.plan{margin-top:10px;font-size:13px;color:var(--dim);line-height:1.5}
+.plan b{color:var(--text)}
+.summary{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--bg);border:1px solid var(--line);font-size:14px;line-height:1.6}
+.summary .w{color:#ff9db8}
+.hist{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.hist div{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--dim);border-bottom:1px solid var(--line);padding:6px 0}
+.hist b{color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res{display:flex;gap:8px;flex-wrap:wrap}
+.empty{color:var(--faint);font-size:14px;text-align:center;padding:16px}
+/* controls */
+.field{display:flex;align-items:center;gap:10px;margin:8px 0}
+.field label{flex:1;color:var(--dim);font-size:14px}
+input[type=number]{width:110px;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:12px;
+  padding:10px 12px;font:600 16px var(--font);text-align:right}
+input[type=range]{width:100%;accent-color:var(--pink)}
+.presets{display:flex;gap:6px;flex-wrap:wrap}
+.presets button{padding:7px 11px;font-size:13px;border-radius:10px}
+.tacho{display:flex;align-items:center;gap:16px}
+.tacho svg{width:84px;height:84px;flex:none}
+.tacho .v{font-size:30px;font-weight:800}
+.tacho .u{color:var(--dim);font-size:13px}
+.pats{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}
+.note{color:var(--faint);font-size:12px;margin-top:12px;line-height:1.5}
+/* sheet */
+.sheet{position:fixed;inset:0;background:rgba(5,3,6,.7);backdrop-filter:blur(6px);display:none;align-items:flex-end;justify-content:center;z-index:9}
+.sheet.open{display:flex}
+.sheet .box{width:100%;max-width:520px;background:var(--panel2);border:1px solid var(--line);border-radius:24px 24px 0 0;padding:22px 18px calc(22px + env(safe-area-inset-bottom));
+  animation:up .28s cubic-bezier(.2,.9,.3,1)}
+@media (min-width:600px){.sheet{align-items:center}.sheet .box{border-radius:24px}}
+@keyframes up{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
+.sheet h3{margin:0 0 4px;font-size:20px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(30px);background:var(--panel2);border:1px solid var(--hot);
+  padding:10px 16px;border-radius:14px;font-size:14px;opacity:0;transition:.3s;z-index:10;max-width:90vw}
+.toast.show{opacity:1;transform:translateX(-50%)}
+footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <!-- Spinny, side view -->
+      <svg viewBox="0 0 172 92" aria-hidden="true">
+        <g id="spinny">
+          <path d="M60 52 Q100 30 150 40 Q166 44 170 47 Q160 54 140 60 Q100 70 64 66Z" fill="#a8667d"/>
+          <path d="M18 47 Q20 30 42 29 Q56 28 64 36 Q86 40 110 40 Q140 42 160 47 Q140 54 110 57 Q84 60 66 60 Q56 66 40 65 Q18 64 18 47Z" fill="#c97c98"/>
+          <path d="M22 44 Q26 33 42 32 Q55 32 62 38 Q86 42 110 42 Q136 44 154 47 Q134 50 110 51 Q84 53 64 52 Q52 55 40 55 Q24 54 22 44Z" fill="#ebb0c3"/>
+          <path d="M28 38 Q40 33 52 36 Q40 37 30 41Z" fill="#fff" opacity=".45"/>
+          <g stroke="#d4386c" stroke-width="2.2" stroke-linecap="round" fill="none">
+            <path d="M58 34 Q56 20 64 10"/><path d="M61 37 Q68 26 80 20"/><path d="M62 41 Q72 36 84 35"/>
+          </g>
+          <g stroke="#f0628f" stroke-width="1.2" stroke-linecap="round">
+            <path d="M57 28l5 -2M58 23l5 -3M60 18l5 -3M63 33l5 1M66 29l5 0M70 26l4 -1M74 23l4 -1M66 39l4 2M70 38l4 2M75 37l4 2M79 36l4 1"/>
+          </g>
+          <g fill="#ebb0c3"><path d="M44 58 l-6 10 l-5 2 l2 -3z"/><path d="M98 57 l-6 9 l-5 2 l2 -3z"/></g>
+          <circle cx="33" cy="42" r="3" fill="#140a0f"/><circle cx="32" cy="41" r="1" fill="#fff"/>
+        </g>
+      </svg>
+      <div><h1>SpinSlicer</h1><small data-i="tag">принтер объёмной печати</small></div>
+    </div>
+    <div class="chips">
+      <div class="chip" id="cEsp"><i></i><span>ESP32</span></div>
+      <div class="chip" id="cProj"><i></i><span data-i="projector">Проектор</span></div>
+      <div class="chip" id="cMotor"><i></i><span id="cMotorT">0.00</span></div>
+      <div class="chip lang" id="lang">EN</div>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section class="card span2">
+      <div class="hero">
+        <div class="ring">
+          <svg viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="52" stroke="#2a2029" stroke-width="7" fill="none"/>
+            <circle id="arc" cx="60" cy="60" r="52" stroke="url(#g)" stroke-width="7" fill="none" stroke-linecap="round"
+                    stroke-dasharray="326.7" stroke-dashoffset="326.7" style="transition:stroke-dashoffset .5s linear"/>
+            <defs><linearGradient id="g"><stop offset="0" stop-color="#ff4f9a"/><stop offset="1" stop-color="#ff8db5"/></linearGradient></defs>
+          </svg>
+          <div class="mid"><div class="big" id="ringBig">—</div><div class="sub" id="ringSub"></div></div>
+        </div>
+        <div class="info">
+          <p class="state" id="state">…</p>
+          <div class="meta" id="meta"></div>
+          <div class="row" id="heroBtns"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i="videos">Видео для печати</h2>
+      <label class="drop" id="drop">
+        <input type="file" id="pick" accept="video/*,.mp4,.mkv,.mov" hidden>
+        <b data-i="drop">Перетащи сюда видео из SpinSlicer</b>
+        <span data-i="drop2">или нажми, чтобы выбрать файл · MP4</span>
+        <div class="bar" id="bar"><i id="barI"></i></div>
+      </label>
+      <div class="files" id="files"></div>
+    </section>
+
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <section class="card">
+        <h2 data-i="motor">Мотор</h2>
+        <div class="tacho">
+          <svg viewBox="0 0 84 84">
+            <circle cx="42" cy="42" r="36" fill="#100b11" stroke="#2a2029" stroke-width="2"/>
+            <g id="ticks"></g>
+            <circle id="dot" cx="42" cy="6" r="4.2" fill="#f7e3ec" style="filter:drop-shadow(0 0 4px #ff4f9a)"/>
+          </svg>
+          <div><div class="v" id="rpmNow">0.00</div><div class="u" data-i="rpm">об/мин</div></div>
+        </div>
+        <div class="field"><label data-i="speed">Скорость, об/мин</label><input type="number" id="rpmSet" min="1" max="30" step="0.01" value="4.00"></div>
+        <div class="row" style="margin-top:6px">
+          <button class="ghost" id="mOn" data-i="spin">Крутить</button>
+          <button class="ghost" id="mOff" data-i="stop">Стоп</button>
+        </div>
+      </section>
+      <section class="card">
+        <h2 data-i="proj">Проектор · настройка</h2>
+        <div class="pats">
+          <button class="ghost" data-p="black" data-i="pBlack">Чёрный</button>
+          <button class="ghost" data-p="white" data-i="pWhite">Белый</button>
+          <button class="ghost" data-p="grid" data-i="pGrid">Сетка</button>
+          <button class="ghost" data-p="focus" data-i="pFocus">Фокус</button>
+          <button class="ghost" data-p="circle" data-i="pCircle">Круг</button>
+        </div>
+        <div class="cal">
+          <div class="field"><label data-i="center">Центровка, пикс</label><input type="number" id="offN" min="-400" max="400" step="1" value="0"></div>
+          <input type="range" id="offR" min="-200" max="200" step="1" value="0">
+          <div class="field"><label data-i="vialw">Ширина флакона, пикс</label><input type="number" id="vialN" min="20" max="1900" step="2" value="400"></div>
+          <input type="range" id="vialR" min="40" max="1200" step="2" value="400">
+        </div>
+        <div class="field" style="margin-top:12px"><label data-i="warmup">Прогрев проектора, мин</label><input type="number" id="warmN" min="0" max="60" step="1" value="5"></div>
+        <p class="note" data-i="projNote">Центровка двигает всё изображение (и при печати), пока линия не совпадёт с осью вращения флакона. Не оставляй смолу под светом!</p>
+      </section>
+    </div>
+  </div>
+  <section class="card" style="margin-top:16px">
+    <h2 data-i="history">Журнал печатей</h2>
+    <div class="hist" id="hist"></div>
+  </section>
+  <footer id="foot">SpinSlicer · SpinPi</footer>
+</div>
+
+<div class="sheet" id="sheet">
+  <div class="box">
+    <h3 id="shName"></h3>
+    <div class="meta" id="shMeta"></div>
+    <div class="plan" id="shPlan"></div>
+    <div class="field" style="margin-top:14px"><label data-i="turns">Обороты</label><input type="number" id="shTurns" min="1" max="999" step="1" value="5"></div>
+    <div class="field"><label data-i="factor">Поправка экспозиции, %</label><input type="number" id="shFactor" min="-50" max="100" step="1" value="0"></div>
+    <div class="field"><label data-i="delay">Пауза до света, с</label><input type="number" id="delay" min="0" max="60" step="1" value="3"></div>
+    <div class="field"><label data-i="revs">Оборотов в видео</label><input type="number" id="revs" min="0.01" max="100" step="0.01" value="1"></div>
+    <div class="summary" id="shSum"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <button class="ghost" id="shCancel" data-i="cancel">Отмена</button>
+      <button class="big" id="shGo" data-i="print">Печать</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const I18N = {
+  ru:{tag:"принтер объёмной печати",projector:"Проектор",videos:"Видео для печати",drop:"Перетащи сюда видео из SpinSlicer",
+      drop2:"или нажми, чтобы выбрать файл · MP4",motor:"Мотор",rpm:"об/мин",speed:"Скорость, об/мин",spin:"Крутить",stop:"Стоп",
+      proj:"Проектор · настройка",pBlack:"Чёрный",pWhite:"Белый",pGrid:"Сетка",pFocus:"Фокус",pCircle:"Круг",
+      exposure:"Время экспозиции, с",
+      revs:"Оборотов в видео",cancel:"Отмена",print:"Печать",
+      sIdle:"Готов к печати",sSpin:"Разгоняю флакон…",sPrint:"Печать",sDone:"Готово!",sErr:"Ошибка",
+      left:"осталось",sync:"синхронизация",noEsp:"ESP32 не подключена — подключи её к Pi по USB",
+      empty:"Пока пусто. В SpinSlicer: Видео → Сохранить MP4, потом перетащи файл сюда.",
+      del:"Удалить?",uploaded:"Загружено",busy:"Принтер занят",printLast:"Печать: ",stopPrint:"Остановить",again:"Ещё раз",
+      frames:"кадров",rev:"оборот",uploading:"Загрузка",turns:"Обороты",tshort:"об.",factor:"Поправка экспозиции, %",warmup:"Прогрев проектора, мин",history:"Журнал печатей",how:"Как получилось?",under:"Недосвет",ok:"Норма",over:"Пересвет",sWait:"Подготовка",wspin:"разгон мотора",wwarm:"прогрев проектора",wdark:"пауза до света",planOf:"Расчёт SpinSlicer",noPlan:"У этого видео нет расчёта SpinSlicer: подбери обороты сам (или экспортируй видео из новой версии SpinSlicer).",turnsOf:"оборот",of:"из",dose:"доза от расчёта",tol:"допуск",cadence:"Частота кадров не делится на частоту экрана: кадры будут показываться неравное время. Экспортируй 30 или 60 к/с.",doseWarn:"Округление до целых оборотов уводит дозу за половину допуска. Поменяй поправку или сделай в SpinSlicer больше оборотов (меньше яркость).",drops:"пропущено кадров",hdmi:"Проектор не подключён по HDMI",warmLeft:"Проектор прогревается",noHist:"Пока пусто",light:"свет",total:"всего",center:"Центровка, пикс",vialw:"Ширина флакона, пикс",untilStop:"До стопа (остановлю сам)",delay:"Пауза до света, с",usb:"USB",elapsed:"прошло",projNote:"Центровка двигает всё изображение (и при печати), пока линия не совпадёт с осью вращения флакона. Не оставляй смолу под светом!"},
+  en:{tag:"volumetric printer",projector:"Projector",videos:"Print videos",drop:"Drop a SpinSlicer video here",
+      drop2:"or tap to choose a file · MP4",motor:"Motor",rpm:"rpm",speed:"Speed, rpm",spin:"Spin",stop:"Stop",
+      proj:"Projector · setup",pBlack:"Black",pWhite:"White",pGrid:"Grid",pFocus:"Focus",pCircle:"Circle",
+      exposure:"Exposure time, s",
+      revs:"Revolutions in the video",cancel:"Cancel",print:"Print",
+      sIdle:"Ready to print",sSpin:"Spinning up the vial…",sPrint:"Printing",sDone:"Done!",sErr:"Error",
+      left:"left",sync:"sync",noEsp:"ESP32 not connected — plug it into the Pi via USB",
+      empty:"Nothing here yet. In SpinSlicer: Video → Save MP4, then drop the file here.",
+      del:"Delete?",uploaded:"Uploaded",busy:"Printer is busy",printLast:"Print: ",stopPrint:"Stop",again:"Print again",
+      frames:"frames",rev:"rev",uploading:"Uploading",turns:"Turns",tshort:"turns",factor:"Exposure correction, %",warmup:"Projector warm-up, min",history:"Print log",how:"How did it come out?",under:"Under",ok:"Good",over:"Over",sWait:"Getting ready",wspin:"motor spin-up",wwarm:"projector warm-up",wdark:"dark spin-up",planOf:"SpinSlicer plan",noPlan:"This video has no SpinSlicer plan: pick the turns yourself (or export it from a newer SpinSlicer).",turnsOf:"turn",of:"of",dose:"dose vs plan",tol:"tolerance",cadence:"The frame rate does not divide the screen refresh: frames will stay on screen for unequal times. Export at 30 or 60 fps.",doseWarn:"Rounding to whole turns moves the dose past half the tolerance. Change the correction or make more turns in SpinSlicer (lower brightness).",drops:"dropped frames",hdmi:"Projector not connected over HDMI",warmLeft:"Projector warming up",noHist:"Nothing yet",light:"light",total:"total",center:"Centering, px",vialw:"Vial width, px",untilStop:"Until stop (I will stop it)",delay:"Dark spin-up, s",usb:"USB",elapsed:"elapsed",projNote:"Centering shifts the whole image (prints too) until the line matches the vial rotation axis. Keep resin out of the light!"}
+};
+let lang = localStorage.getItem("spinpi-lang") || (navigator.language||"ru").slice(0,2);
+if(!I18N[lang]) lang="en";
+const t = k => I18N[lang][k] || k;
+function applyLang(){
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i]").forEach(e=>e.textContent=t(e.dataset.i));
+  $("lang").textContent = lang==="ru" ? "EN" : "RU";
+  render(); renderFiles();
+}
+const $ = id => document.getElementById(id);
+let S = null, FILES = [], sel = null;
+
+function toast(msg){ const e=$("toast"); e.textContent=msg; e.classList.add("show"); clearTimeout(e._t); e._t=setTimeout(()=>e.classList.remove("show"),2200); }
+async function api(path, body, method){
+  const r = await fetch(path,{method:method||(body?"POST":"GET"),headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+  return r.json();
+}
+const fmtT = s => { s=Math.max(0,Math.round(s)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
+const fmtMB = b => (b/1048576).toFixed(b>1e8?0:1)+" MB";
+
+// tachometer ticks
+(()=>{ let h=""; for(let i=0;i<12;i++){ const a=i*Math.PI/6-Math.PI/2, r0=i%3?30:27, r1=34;
+  h+=`<line x1="${42+Math.cos(a)*r0}" y1="${42+Math.sin(a)*r0}" x2="${42+Math.cos(a)*r1}" y2="${42+Math.sin(a)*r1}" stroke="${i?'#4a3b44':'#ff8db5'}" stroke-width="${i?1.5:2.2}" stroke-linecap="round"/>`;}
+  $("ticks").innerHTML=h; })();
+let shownAngle=0, lastFrame=performance.now();
+function animate(now){
+  const dt=(now-lastFrame)/1000; lastFrame=now;
+  if(S){ // extrapolate between updates so the dot turns smoothly
+    shownAngle += S.motor_rpm*6*dt;
+    const target=S.motor_angle||0, d=((target-shownAngle)%360+540)%360-180;
+    shownAngle += d*Math.min(1,dt*3);
+  }
+  const a=shownAngle*Math.PI/180-Math.PI/2;
+  $("dot").setAttribute("cx",42+Math.cos(a)*36); $("dot").setAttribute("cy",42+Math.sin(a)*36);
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+
+function render(){
+  if(!S) return;
+  $("cEsp").classList.toggle("on",S.esp);
+  $("cProj").classList.toggle("on",S.projector);
+  $("cMotor").classList.toggle("on",S.motor_rpm>0.01);
+  $("cMotorT").textContent = S.motor_rpm.toFixed(2)+" "+t("rpm");
+  $("rpmNow").textContent = S.motor_rpm.toFixed(2);
+  const st=S.state, j=S.job;
+  const names={idle:"sIdle",wait:"sWait",print:"sPrint",done:"sDone",error:"sErr"};
+  $("state").textContent = t(names[st]||"sIdle");
+  let meta="", big="—", sub="", p=0, btns="";
+  const busy = st==="print"||st==="wait";
+  if(busy && j){
+    if(st==="wait" && S.wait){ big=fmtT(S.wait[0]); sub=t("w"+S.wait[1]); p=0; }
+    else { p=j.progress; big=fmtT(j.left_s); sub=t("left"); }
+    meta=`<b>${esc(j.file)}</b><br>${t("turnsOf")} ${Math.max(1,j.turn)} ${t("of")} ${j.revs} · ${fmtT(j.time_s)} ${t("light")} · ${j.rpm.toFixed(2)} ${t("rpm")}`+
+         (S.sync_ms!=null?` · ${t("sync")} ±${S.sync_ms.toFixed(0)} ms`:"")+
+         (S.drops?`<br><span style="color:#ff9db8">${t("drops")}: ${S.drops}</span>`:"");
+    btns=`<button class="danger big" onclick="stopPrint()">${t("stopPrint")}</button>`;
+  } else {
+    if(st==="done"){ p=1; big="✓"; }
+    const lastH=S.history&&S.history[S.history.length-1];
+    if(st==="done" && lastH && !lastH.result){
+      meta+=`${t("how")}<div class="res" style="margin-top:8px">`+["under","ok","over"].map(r=>`<button class="ghost" onclick="sendResult('${r}')">${t(r)}</button>`).join("")+`</div>`;
+    }
+    if(S.hdmi===false) meta+=`<span style="color:var(--warn)">${t("hdmi")}</span><br>`;
+    else if(S.warmup_left_s>0) meta+=`<span style="color:var(--warn)">${t("warmLeft")}: ${fmtT(S.warmup_left_s)}</span><br>`;
+    if(st==="error") meta=`<span style="color:#ff9db8">${esc(S.msg)}</span><br>`;
+    if(!S.esp) meta+=t("noEsp")+"<br>";
+    if(!S.projector && S.projector_err) meta+=`<span style="color:var(--warn)">mpv: ${esc(S.projector_err)}</span><br>`;
+    const last=S.settings.last_id && FILES.find(f=>f.id===S.settings.last_id);
+    if(last){ meta+=`${t("printLast")}<b>${esc(last.name)}</b>`; btns=`<button class="big" onclick="openSheet('${encodeURIComponent(last.id)}')">${st==="done"?t("again"):t("print")}</button>`; }
+  }
+  $("arc").style.strokeDashoffset = 326.7*(1-p);
+  $("ringBig").textContent=big; $("ringSub").textContent=sub;
+  $("meta").innerHTML=meta; $("heroBtns").innerHTML=btns;
+  document.querySelectorAll("#files button.go").forEach(b=>b.disabled=busy);
+  syncCal();
+  renderHist();
+  if(document.activeElement!==$("warmN")) $("warmN").value=S.settings.warmup_min;
+  $("foot").textContent=`SpinPi ${S.version}`+(S.esp_version?` · SpinScreen ${S.esp_version}`:"");
+}
+const esc = s => String(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function renderFiles(){
+  const box=$("files");
+  if(!FILES.length){ box.innerHTML=`<div class="empty">${t("empty")}</div>`; return; }
+  box.innerHTML=FILES.map(f=>{
+    const n=encodeURIComponent(f.id);
+    const d=[f.width&&`${f.width}×${f.height}`, f.frames&&`${f.frames} ${t("frames")}`, f.fps&&`${+f.fps.toFixed(2)} fps`].filter(Boolean).join(" · ");
+    const r=f.rpm?`${f.rpm.toFixed(2)} ${t("rpm")} · ${t("rev")} ${f.rev_s.toFixed(1)} s · ${fmtMB(f.size)}`:fmtMB(f.size);
+    const usb=f.source==="usb";
+    return `<div class="file${S&&S.settings.last_id===f.id?" sel":""}">
+      <img src="/api/thumb?id=${n}&v=${f.size}" alt="" onerror="this.style.visibility='hidden'">
+      <div class="t"><div class="n">${esc(f.name)}${usb?`<span class="badge">${t("usb")}</span>`:""}</div><div class="d">${d}</div><div class="d">${r}</div></div>
+      <button class="go" onclick="openSheet('${n}')">${t("print")}</button>
+      ${usb?"":`<button class="ghost" onclick="delFile('${n}')" aria-label="delete">✕</button>`}</div>`;
+  }).join("");
+}
+async function loadFiles(){ FILES=await api("/api/files"); renderFiles(); render(); }
+
+// upload with progress
+function upload(file){
+  const bar=$("bar"), bi=$("barI"); bar.style.display="block"; bi.style.width="0";
+  const x=new XMLHttpRequest(); const t0=Date.now();
+  x.open("PUT","/api/files/"+encodeURIComponent(file.name));
+  x.upload.onprogress=e=>{ if(e.lengthComputable){ bi.style.width=(100*e.loaded/e.total)+"%";
+    const mbps=e.loaded/1048576/Math.max(.1,(Date.now()-t0)/1000);
+    document.querySelector("#drop span").textContent=`${t("uploading")} ${Math.round(100*e.loaded/e.total)}% · ${mbps.toFixed(1)} MB/s`; } };
+  x.onload=()=>{ bar.style.display="none"; document.querySelector("#drop span").textContent=t("drop2");
+    try{ const r=JSON.parse(x.responseText); if(r.ok){ toast(t("uploaded")+": "+r.name); loadFiles(); } else toast(r.error); }catch(e){ toast("upload failed"); } };
+  x.onerror=()=>{ bar.style.display="none"; toast("upload failed"); };
+  x.send(file);
+}
+const drop=$("drop");
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop",e=>{ [...e.dataTransfer.files].forEach(upload); });
+$("pick").addEventListener("change",e=>{ [...e.target.files].forEach(upload); e.target.value=""; });
+
+async function delFile(n){ const id=decodeURIComponent(n); if(!confirm(t("del")+"\n"+id.slice(4))) return; await api("/api/files?id="+n,null,"DELETE"); loadFiles(); }
+
+// print sheet
+function openSheet(n){
+  sel=decodeURIComponent(n); const f=FILES.find(x=>x.id===sel); if(!f) return;
+  $("shName").textContent=f.name;
+  $("shMeta").textContent=f.rpm?`${f.rpm.toFixed(2)} ${t("rpm")} · ${f.frames} ${t("frames")} · ${+f.fps.toFixed(2)} fps`:"";
+  const fac=S?S.settings.factor:1;
+  $("shFactor").value=Math.round(100*(fac-1));
+  $("shPlan").innerHTML = f.plan_revs ? `${t("planOf")}: <b>${f.plan_revs.toFixed(2)}</b> ${t("tshort")} · ${fmtT(f.plan_revs*f.rev_s)}`+(f.tolerance_pct?` · ${t("tol")} ±${f.tolerance_pct.toFixed(0)}%`:"") : `<span style="color:var(--warn)">${t("noPlan")}</span>`;
+  $("delay").value=S?S.settings.delay_s:3;
+  $("revs").value=+(f.revs||1).toFixed(2);
+  turnsManual=false;
+  $("shTurns").value = f.plan_revs ? Math.max(1,Math.round(f.plan_revs*fac)) : (S?S.settings.default_revs:5);
+  updatePlan();
+  $("sheet").classList.add("open");
+}
+let turnsManual=false;
+async function updatePlan(){
+  const f=FILES.find(x=>x.id===sel); if(!f) return;
+  const factor=1+(+$("shFactor").value||0)/100;
+  const body={id:sel,factor}; if(turnsManual) body.revs=+$("shTurns").value;
+  const p=await api("/api/plan",body);
+  if(!turnsManual) $("shTurns").value=p.revs;
+  let h=`<b>${p.revs}</b> ${t("tshort")} · <b>${fmtT(p.time_s)}</b> ${t("light")}`;
+  if(p.dose_dev_pct!=null) h+=` · ${t("dose")} ${p.dose_dev_pct>=0?"+":""}${p.dose_dev_pct.toFixed(1)}%`;
+  const tol=p.tolerance_pct||5;
+  if(p.dose_dev_pct!=null && Math.abs(p.dose_dev_pct)>tol/2) h+=`<div class="w">${t("doseWarn")}</div>`;
+  if(!p.cadence_ok) h+=`<div class="w">${t("cadence")}</div>`;
+  $("shSum").innerHTML=h;
+}
+$("shFactor").oninput=()=>updatePlan();
+$("shTurns").oninput=()=>{ turnsManual=true; updatePlan(); };
+$("shCancel").onclick=()=>$("sheet").classList.remove("open");
+$("sheet").onclick=e=>{ if(e.target.id==="sheet") $("sheet").classList.remove("open"); };
+$("shGo").onclick=async()=>{
+  let f=FILES.find(x=>x.id===sel); const revs=+$("revs").value||1;
+  if(f && Math.abs(revs-(f.revs||1))>0.005){ await api("/api/revs",{id:sel,revs}); await loadFiles(); f=FILES.find(x=>x.id===sel); }
+  const r=await api("/api/print",{id:sel,revs:+$("shTurns").value,factor:1+(+$("shFactor").value||0)/100,delay_s:+$("delay").value});
+  $("sheet").classList.remove("open");
+  if(!r.ok) toast(r.error==="busy"?t("busy"):r.error);
+};
+async function stopPrint(){ await api("/api/stop",{}); }
+async function sendResult(r){ const x=await api("/api/result",{result:r}); if(x.ok) toast(`${t("factor")}: ${x.factor_pct>=0?"+":""}${x.factor_pct.toFixed(0)}`); }
+function renderHist(){
+  const h=(S.history||[]).slice().reverse();
+  $("hist").innerHTML = h.length ? h.map(e=>`<div><b>${esc(e.file)}</b><span>${e.revs} ${t("tshort")} · ${fmtT(e.time_s)} · ${e.factor>=1?"+":""}${Math.round(100*(e.factor-1))}% · ${e.result?t(e.result):"—"}</span></div>`).join("") : `<div>${t("noHist")}</div>`;
+}
+$("warmN").onchange=()=>api("/api/settings",{warmup_min:+$("warmN").value});
+
+// motor + projector
+$("mOn").onclick=async()=>{ const r=await api("/api/motor",{on:true,rpm:+$("rpmSet").value}); if(!r.ok) toast(t("busy")); };
+$("mOff").onclick=async()=>{ const r=await api("/api/motor",{on:false}); if(!r.ok) toast(t("busy")); };
+document.querySelectorAll("[data-p]").forEach(b=>b.onclick=async()=>{ const r=await api("/api/projector",{pattern:b.dataset.p}); if(!r.ok) toast(t("busy")); });
+let calT=null, calFocus=false;
+function sendCal(show){ clearTimeout(calT); calT=setTimeout(()=>api("/api/calibration",{offset_px:+$("offN").value,vial_px:+$("vialN").value,show}),80); }
+function syncCal(){ if(calFocus||!S) return; const s=S.settings; $("offN").value=s.offset_px; $("offR").value=s.offset_px; $("vialN").value=s.vial_px; $("vialR").value=s.vial_px; }
+[["offN","offR","center"],["vialN","vialR","vial"]].forEach(([n,r,show])=>{
+  $(r).oninput=()=>{ $(n).value=$(r).value; sendCal(show); };
+  $(n).oninput=()=>{ $(r).value=$(n).value; sendCal(show); };
+  [n,r].forEach(i=>{ $(i).onfocus=()=>calFocus=true; $(i).onblur=()=>calFocus=false; });
+});
+$("lang").onclick=()=>{ lang=lang==="ru"?"en":"ru"; try{localStorage.setItem("spinpi-lang",lang);}catch(e){} applyLang(); };
+
+// live state
+function connect(){
+  const es=new EventSource("/api/events");
+  let prevState=null;
+  es.onmessage=e=>{ S=JSON.parse(e.data); render(); if(prevState && prevState!==S.state) loadFiles(); prevState=S.state; };
+  es.onerror=()=>{ es.close(); setTimeout(connect,2000); };
+}
+applyLang(); loadFiles(); connect();
+</script>
+</body>
+</html>

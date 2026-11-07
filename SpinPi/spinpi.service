@@ -1,0 +1,14 @@
+[Unit]
+Description=SpinPi - SpinSlicer CAL printer (web page, projector, ESP32 link)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# root: needs port 80, the projector (DRM) and the USB serial port
+ExecStartPre=-/bin/sh -c 'setterm --cursor off --blank force </dev/tty1 >/dev/tty1 2>&1'
+ExecStart=/usr/bin/python3 /opt/spinpi/spinpi.py --data /var/lib/spinpi --port 80 --projector 1280x800
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
