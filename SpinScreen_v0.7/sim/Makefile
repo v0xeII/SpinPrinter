@@ -33,5 +33,8 @@ clean:
 
 .PHONY: all clean
 
+dirty_test: dirty_test.cpp $(FW) qr.o
+	$(CXX) $(CXXFLAGS) dirty_test.cpp ../SpinScreen/ui.cpp qr.o -o $@
+
 spinny_stress: spinny_stress.cpp $(FW) qr.o
 	$(CXX) $(CXXFLAGS) -DUI_PROBE spinny_stress.cpp ../SpinScreen/ui.cpp qr.o -o $@

@@ -34,12 +34,8 @@ static bool dbl = false, first = true;
 static spi_transaction_t trs[64];
 static int trNext = 0;
 static int offX = 0, offY = 0;
-// one buffer only: a hash per tile (DIRTY_BAND rows x TILE_W columns) of the last frame sent, so
-// only the changed columns of a band go out, not the whole width (a pulsing dot used to cost a
-// full-width band: 10 KB per frame instead of 0.5 KB)
-static const int TILE_W = 16;
-static const int TILES_X = (DISPLAY_W + TILE_W - 1) / TILE_W;
-static uint32_t tileHash[(DISPLAY_H + DIRTY_BAND - 1) / DIRTY_BAND][TILES_X];
+// one buffer only: hashes per tile of the last frame sent (dirty.h: dirtyTiles)
+static uint32_t tileHash[((DISPLAY_H + DIRTY_BAND - 1) / DIRTY_BAND) * ((DISPLAY_W + DIRTY_TILE_W - 1) / DIRTY_TILE_W)];
 
 static void IRAM_ATTR preCb(spi_transaction_t* t) {
   gpio_set_level((gpio_num_t)PIN_TFT_DC, (int)(intptr_t)t->user);
@@ -239,62 +235,17 @@ uint32_t display_push() {
   } else if (dbl) {  // the other buffer = what is on the screen now
     n = dirtyRects(b, fbs[cur ^ 1], W, H, rects, MAXRECTS);
   } else {  // one buffer only: compare tile hashes with the last frame sent
-    // Each band is cut into runs of changed tiles (a clean gap of GAP tiles or more splits them),
-    // and a run continues the rectangle above it when it has the same columns. So a card on the
-    // left and a pill on the right go out as two narrow rectangles, not one full-width one.
-    const int GAP = 3, MAXRUN = 4;
-    struct Open { int x0, x1, y0; bool used; } open[MAXRUN];
-    int nOpen = 0;
-    n = 0;
-    auto emit = [&](int x0, int x1, int y0, int y1) {
-      if (n < MAXRECTS) { rects[n++] = {x0, y0, x1 - x0, y1 - y0}; return; }
-      DirtyRect& r = rects[MAXRECTS - 1];  // out of slots: grow the last one
-      int rx1 = r.x + r.w, ry1 = r.y + r.h;
-      if (x0 < r.x) r.x = x0;
-      if (y0 < r.y) r.y = y0;
-      if (x1 > rx1) rx1 = x1;
-      if (y1 > ry1) ry1 = y1;
-      r.w = rx1 - r.x;
-      r.h = ry1 - r.y;
-    };
-    for (int band = 0, y0 = 0; y0 < H; band++, y0 += DIRTY_BAND) {
-      int y1 = y0 + DIRTY_BAND > H ? H : y0 + DIRTY_BAND;
-      uint32_t h[TILES_X];
-      for (int t = 0; t < TILES_X; t++) h[t] = 2166136261u;
-      for (int y = y0; y < y1; y++) {
-        const uint32_t* q = (const uint32_t*)(b + y * W);
-        for (int t = 0, i = 0; t < TILES_X; t++) {
-          int e = (t + 1) * TILE_W / 2 < W / 2 ? (t + 1) * TILE_W / 2 : W / 2;
-          uint32_t v = h[t];
-          for (; i < e; i++) v = (v ^ q[i]) * 16777619u;
-          h[t] = v;
-        }
-      }
-      // runs of changed tiles in this band
-      int rx0[MAXRUN], rx1[MAXRUN], nr = 0, last = -100;
-      for (int t = 0; t < TILES_X; t++) {
-        if (h[t] == tileHash[band][t]) continue;
-        tileHash[band][t] = h[t];
-        if (nr > 0 && (t - last <= GAP || nr == MAXRUN)) rx1[nr - 1] = t;
-        else { rx0[nr] = t; rx1[nr] = t; nr++; }
-        last = t;
-      }
-      for (int k = 0; k < nOpen; k++) open[k].used = false;
-      for (int r = 0; r < nr; r++) {
-        int x0 = rx0[r] * TILE_W, x1 = (rx1[r] + 1) * TILE_W > W ? W : (rx1[r] + 1) * TILE_W;
-        int k = 0;
-        while (k < nOpen && !(open[k].x0 == x0 && open[k].x1 == x1 && !open[k].used)) k++;
-        if (k < nOpen) { open[k].used = true; continue; }  // same columns as the band above: grow it
-        if (nOpen < MAXRUN) open[nOpen++] = {x0, x1, y0, true};
-        else emit(x0, x1, y0, y1);
-      }
-      for (int k = 0; k < nOpen;) {  // rectangles that did not go on: close them
-        if (open[k].used) { k++; continue; }
-        emit(open[k].x0, open[k].x1, open[k].y0, y0);
-        open[k] = open[--nOpen];
-      }
-    }
-    for (int k = 0; k < nOpen; k++) emit(open[k].x0, open[k].x1, open[k].y0, H);
+    n = dirtyTiles(b, W, H, tileHash, rects, MAXRECTS);
+  }
+  // Self-healing: one band of rows also goes out every frame, round the screen (all of it every
+  // H / 8 frames: half a second on 320x240 at 60 fps). Only changes are sent otherwise, so a pixel
+  // garbled on the wire (long or breadboard wires, a fast SPI clock) would stay on the panel
+  // until that spot changed again. Costs ~5 KB a frame, about 1 ms at 40 MHz.
+  static int healY = 0;
+  if (!first && n < MAXRECTS) {
+    int hh = H - healY < DIRTY_BAND ? H - healY : DIRTY_BAND;
+    rects[n++] = {0, healY, W, hh};
+    healY = healY + DIRTY_BAND >= H ? 0 : healY + DIRTY_BAND;
   }
   uint32_t bytes = 0;
   for (int i = 0; i < n; i++) bytes += sendRect(b, rects[i]);
