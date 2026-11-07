@@ -1,0 +1,14 @@
+# real time: the projector loop must never wait for anything else
+CONFIG_PREEMPT_RT=y
+# CONFIG_PREEMPT is not set
+CONFIG_NO_HZ_FULL=y
+CONFIG_HZ_1000=y
+# constant CPU clock (no frequency jumps in the middle of a frame)
+CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y
+# CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND is not set
+# nothing may draw on the projector but SpinProj: no text console, no penguin
+# CONFIG_FRAMEBUFFER_CONSOLE is not set
+# CONFIG_LOGO is not set
+# the root file system is squashfs
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_LZ4=y

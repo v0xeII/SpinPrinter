@@ -95,6 +95,11 @@ button:disabled{opacity:.35;cursor:not-allowed}
 input[type=number]{width:110px;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:12px;
   padding:10px 12px;font:600 16px var(--font);text-align:right}
 input[type=range]{width:100%;accent-color:var(--pink)}
+input.txt{flex:1.4;min-width:0;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:12px;
+  padding:10px 12px;font:600 16px var(--font)}
+.nets{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.nets button{font-size:14px;padding:8px 12px}
+.nets small{color:var(--dim);font-weight:500;margin-left:4px}
 .presets{display:flex;gap:6px;flex-wrap:wrap}
 .presets button{padding:7px 11px;font-size:13px;border-radius:10px}
 .tacho{display:flex;align-items:center;gap:16px}
@@ -216,6 +221,18 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
       </section>
     </div>
   </div>
+  <section class="card" id="wifiCard" style="margin-top:16px;display:none">
+    <h2 data-i="wifi">Wi-Fi</h2>
+    <div class="meta" id="wifiNow"></div>
+    <div class="nets" id="wifiNets"></div>
+    <div class="field"><label data-i="wifiName">Сеть</label><input class="txt" id="wifiSsid" maxlength="32" autocomplete="off"></div>
+    <div class="field"><label data-i="wifiPass">Пароль</label><input class="txt" id="wifiPsk" type="password" maxlength="63" autocomplete="off"></div>
+    <div class="row">
+      <button class="ghost" id="wifiScan" data-i="wifiScan">Найти сети</button>
+      <button id="wifiGo" data-i="wifiGo">Подключить</button>
+    </div>
+    <p class="note" data-i="wifiNote">Принтер подключится к этой сети. Потом подключи телефон к той же сети и открой spinslicer.local. Если не вышло, через минуту принтер снова раздаст свою сеть SpinSlicer.</p>
+  </section>
   <section class="card" style="margin-top:16px">
     <h2 data-i="history">Журнал печатей</h2>
     <div class="hist" id="hist"></div>
@@ -252,7 +269,8 @@ const I18N = {
       left:"осталось",sync:"синхронизация",noEsp:"ESP32 не подключена — подключи её к Pi по USB",
       empty:"Пока пусто. В SpinSlicer: Видео → Сохранить MP4, потом перетащи файл сюда.",
       del:"Удалить?",uploaded:"Загружено",busy:"Принтер занят",printLast:"Печать: ",stopPrint:"Остановить",again:"Ещё раз",
-      frames:"кадров",rev:"оборот",uploading:"Загрузка",turns:"Обороты",tshort:"об.",factor:"Поправка экспозиции, %",warmup:"Прогрев проектора, мин",history:"Журнал печатей",how:"Как получилось?",under:"Недосвет",ok:"Норма",over:"Пересвет",sWait:"Подготовка",wspin:"разгон мотора",wwarm:"прогрев проектора",wdark:"пауза до света",planOf:"Расчёт SpinSlicer",noPlan:"У этого видео нет расчёта SpinSlicer: подбери обороты сам (или экспортируй видео из новой версии SpinSlicer).",turnsOf:"оборот",of:"из",dose:"доза от расчёта",tol:"допуск",cadence:"Частота кадров не делится на частоту экрана: кадры будут показываться неравное время. Экспортируй 30 или 60 к/с.",doseWarn:"Округление до целых оборотов уводит дозу за половину допуска. Поменяй поправку или сделай в SpinSlicer больше оборотов (меньше яркость).",drops:"пропущено кадров",hdmi:"Проектор не подключён по HDMI",warmLeft:"Проектор прогревается",noHist:"Пока пусто",light:"свет",total:"всего",center:"Центровка, пикс",vialw:"Ширина флакона, пикс",untilStop:"До стопа (остановлю сам)",delay:"Пауза до света, с",usb:"USB",elapsed:"прошло",projNote:"Центровка двигает всё изображение (и при печати), пока линия не совпадёт с осью вращения флакона. Не оставляй смолу под светом!"},
+      frames:"кадров",rev:"оборот",uploading:"Загрузка",turns:"Обороты",tshort:"об.",factor:"Поправка экспозиции, %",warmup:"Прогрев проектора, мин",history:"Журнал печатей",how:"Как получилось?",under:"Недосвет",ok:"Норма",over:"Пересвет",sWait:"Подготовка",wspin:"разгон мотора",wwarm:"прогрев проектора",wdark:"пауза до света",planOf:"Расчёт SpinSlicer",noPlan:"У этого видео нет расчёта SpinSlicer: подбери обороты сам (или экспортируй видео из новой версии SpinSlicer).",turnsOf:"оборот",of:"из",dose:"доза от расчёта",tol:"допуск",cadence:"Частота кадров не делится на частоту экрана: кадры будут показываться неравное время. Экспортируй 30 или 60 к/с.",doseWarn:"Округление до целых оборотов уводит дозу за половину допуска. Поменяй поправку или сделай в SpinSlicer больше оборотов (меньше яркость).",drops:"пропущено кадров",hdmi:"Проектор не подключён по HDMI",warmLeft:"Проектор прогревается",noHist:"Пока пусто",light:"свет",total:"всего",center:"Центровка, пикс",vialw:"Ширина флакона, пикс",untilStop:"До стопа (остановлю сам)",delay:"Пауза до света, с",usb:"USB",elapsed:"прошло",projNote:"Центровка двигает всё изображение (и при печати), пока линия не совпадёт с осью вращения флакона. Не оставляй смолу под светом!",
+      wifi:"Wi-Fi",wifiName:"Сеть",wifiPass:"Пароль",wifiScan:"Найти сети",wifiGo:"Подключить",wifiOn:"Подключён к",wifiAp:"Принтер раздаёт свою сеть «%s». Выбери домашний Wi-Fi:",wifiNone:"Wi-Fi не подключён",wifiGoing:"Подключаюсь… Переключи телефон на домашнюю сеть и открой spinslicer.local",wifiNote:"Принтер подключится к этой сети. Потом подключи телефон к той же сети и открой spinslicer.local. Если не вышло, через минуту принтер снова раздаст свою сеть SpinSlicer."},
   en:{tag:"volumetric printer",projector:"Projector",videos:"Print videos",drop:"Drop a SpinSlicer video here",
       drop2:"or tap to choose a file · MP4",motor:"Motor",rpm:"rpm",speed:"Speed, rpm",spin:"Spin",stop:"Stop",
       proj:"Projector · setup",pBlack:"Black",pWhite:"White",pGrid:"Grid",pFocus:"Focus",pCircle:"Circle",
@@ -262,7 +280,8 @@ const I18N = {
       left:"left",sync:"sync",noEsp:"ESP32 not connected — plug it into the Pi via USB",
       empty:"Nothing here yet. In SpinSlicer: Video → Save MP4, then drop the file here.",
       del:"Delete?",uploaded:"Uploaded",busy:"Printer is busy",printLast:"Print: ",stopPrint:"Stop",again:"Print again",
-      frames:"frames",rev:"rev",uploading:"Uploading",turns:"Turns",tshort:"turns",factor:"Exposure correction, %",warmup:"Projector warm-up, min",history:"Print log",how:"How did it come out?",under:"Under",ok:"Good",over:"Over",sWait:"Getting ready",wspin:"motor spin-up",wwarm:"projector warm-up",wdark:"dark spin-up",planOf:"SpinSlicer plan",noPlan:"This video has no SpinSlicer plan: pick the turns yourself (or export it from a newer SpinSlicer).",turnsOf:"turn",of:"of",dose:"dose vs plan",tol:"tolerance",cadence:"The frame rate does not divide the screen refresh: frames will stay on screen for unequal times. Export at 30 or 60 fps.",doseWarn:"Rounding to whole turns moves the dose past half the tolerance. Change the correction or make more turns in SpinSlicer (lower brightness).",drops:"dropped frames",hdmi:"Projector not connected over HDMI",warmLeft:"Projector warming up",noHist:"Nothing yet",light:"light",total:"total",center:"Centering, px",vialw:"Vial width, px",untilStop:"Until stop (I will stop it)",delay:"Dark spin-up, s",usb:"USB",elapsed:"elapsed",projNote:"Centering shifts the whole image (prints too) until the line matches the vial rotation axis. Keep resin out of the light!"}
+      frames:"frames",rev:"rev",uploading:"Uploading",turns:"Turns",tshort:"turns",factor:"Exposure correction, %",warmup:"Projector warm-up, min",history:"Print log",how:"How did it come out?",under:"Under",ok:"Good",over:"Over",sWait:"Getting ready",wspin:"motor spin-up",wwarm:"projector warm-up",wdark:"dark spin-up",planOf:"SpinSlicer plan",noPlan:"This video has no SpinSlicer plan: pick the turns yourself (or export it from a newer SpinSlicer).",turnsOf:"turn",of:"of",dose:"dose vs plan",tol:"tolerance",cadence:"The frame rate does not divide the screen refresh: frames will stay on screen for unequal times. Export at 30 or 60 fps.",doseWarn:"Rounding to whole turns moves the dose past half the tolerance. Change the correction or make more turns in SpinSlicer (lower brightness).",drops:"dropped frames",hdmi:"Projector not connected over HDMI",warmLeft:"Projector warming up",noHist:"Nothing yet",light:"light",total:"total",center:"Centering, px",vialw:"Vial width, px",untilStop:"Until stop (I will stop it)",delay:"Dark spin-up, s",usb:"USB",elapsed:"elapsed",projNote:"Centering shifts the whole image (prints too) until the line matches the vial rotation axis. Keep resin out of the light!",
+      wifi:"Wi-Fi",wifiName:"Network",wifiPass:"Password",wifiScan:"Find networks",wifiGo:"Connect",wifiOn:"Connected to",wifiAp:"The printer runs its own network “%s”. Pick your home Wi-Fi:",wifiNone:"Wi-Fi not connected",wifiGoing:"Connecting… Switch the phone to your home network and open spinslicer.local",wifiNote:"The printer joins this network. Then join the same network with your phone and open spinslicer.local. If it fails, the printer brings back its own SpinSlicer network within a minute."}
 };
 let lang = localStorage.getItem("spinpi-lang") || (navigator.language||"ru").slice(0,2);
 if(!I18N[lang]) lang="en";
@@ -453,7 +472,24 @@ function connect(){
   es.onmessage=e=>{ S=JSON.parse(e.data); render(); if(prevState && prevState!==S.state) loadFiles(); prevState=S.state; };
   es.onerror=()=>{ es.close(); setTimeout(connect,2000); };
 }
-applyLang(); loadFiles(); connect();
+// Wi-Fi (SpinOS only: on other systems the card stays hidden)
+let WIFI=null;
+function renderWifi(){
+  const w=WIFI; if(!w||!w.available) return;
+  const c=$("wifiCard"); c.style.display="";
+  if(w.mode==="ap" && !c._top){ c._top=1; c.style.margin="0 0 16px"; document.querySelector(".wrap").insertBefore(c, document.querySelector(".grid")); }
+  $("wifiNow").innerHTML = w.mode==="client" ? `${t("wifiOn")} <b>${esc(w.ssid)}</b> · ${esc(w.ip)}`
+    : w.mode==="ap" ? esc(t("wifiAp").replace("%s", w.ap_name||"SpinSlicer")) : t("wifiNone");
+  $("wifiNets").innerHTML=(w.networks||[]).map(n=>`<button class="ghost" data-s="${esc(n.ssid)}">${esc(n.ssid)}<small>${n.signal>-60?"▂▄▆":n.signal>-75?"▂▄":"▂"}</small></button>`).join("");
+  $("wifiNets").querySelectorAll("button").forEach(b=>b.onclick=()=>{ $("wifiSsid").value=b.dataset.s; $("wifiPsk").focus(); });
+}
+async function loadWifi(scan){
+  try{ const w=await api("/api/wifi"+(scan?"?scan=1":"")); if(w.networks&&!w.networks.length&&WIFI) w.networks=WIFI.networks; WIFI=w; }catch(e){ return; }
+  renderWifi();
+}
+$("wifiScan").onclick=()=>loadWifi(true);
+$("wifiGo").onclick=async()=>{ const r=await api("/api/wifi",{ssid:$("wifiSsid").value.trim(),psk:$("wifiPsk").value}); toast(r.ok?t("wifiGoing"):r.error); };
+applyLang(); loadFiles(); connect(); loadWifi(true);
 </script>
 </body>
 </html>

@@ -1,0 +1,16 @@
+#!/bin/sh
+# SSH only if someone put a key in /data/ssh/authorized_keys (no passwords, ever).
+KEYS=/data/ssh/authorized_keys
+case "$1" in
+start)
+	[ -s $KEYS ] || exit 0
+	mkdir -p /root/.ssh 2>/dev/null
+	dropbear -R -s -r /data/ssh/host_key_ed25519 2>/dev/null || {
+		dropbearkey -t ed25519 -f /data/ssh/host_key_ed25519 >/dev/null 2>&1
+		dropbear -s -r /data/ssh/host_key_ed25519
+	}
+	;;
+stop)
+	killall -q dropbear
+	;;
+esac

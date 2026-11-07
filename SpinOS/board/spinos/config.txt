@@ -1,0 +1,22 @@
+# SpinOS: Raspberry Pi 3B. The projector must stay black from power-on.
+start_file=start.elf
+fixup_file=fixup.dat
+kernel=Image
+arm_64bit=1
+
+# no rainbow square, no boot delay
+disable_splash=1
+boot_delay=0
+
+# HDMI: KMS driver (SpinProj draws through DRM), output on even if the projector is switched on later
+dtoverlay=vc4-kms-v3d
+hdmi_force_hotplug=1
+disable_overscan=1
+gpu_mem=64
+
+# serial console on the GPIO pins (for debugging), Bluetooth on the mini UART
+dtoverlay=miniuart-bt
+enable_uart=1
+
+# not needed
+dtparam=audio=off

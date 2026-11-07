@@ -1,0 +1,61 @@
+# Builds the SpinOS image for Raspberry Pi 3B with Buildroot (about 1-2 hours on GitHub).
+#   by hand: Actions -> spinos -> Run workflow       -> the image is in the run's artifacts
+#   a tag v0.1.0 etc.: the same + a GitHub release with spinos-rpi3.img.xz for everyone
+name: spinos
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+env:
+  BUILDROOT_VERSION: "2026.02.3"
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    permissions:
+      contents: write
+    steps:
+      - name: free disk space (the build needs ~15 GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential file wget cpio unzip rsync bc libncurses-dev python3 xz-utils
+      - name: buildroot
+        run: |
+          wget -q https://buildroot.org/downloads/buildroot-$BUILDROOT_VERSION.tar.xz
+          tar xf buildroot-$BUILDROOT_VERSION.tar.xz
+      - uses: actions/cache@v4
+        with:
+          path: dl
+          key: br-dl-${{ env.BUILDROOT_VERSION }}-${{ hashFiles('SpinOS/configs/*') }}
+          restore-keys: br-dl-${{ env.BUILDROOT_VERSION }}-
+      - name: build
+        run: |
+          make -C buildroot-$BUILDROOT_VERSION BR2_EXTERNAL=$PWD/SpinOS O=$PWD/out BR2_DL_DIR=$PWD/dl spinos_rpi3_defconfig
+          make -C buildroot-$BUILDROOT_VERSION O=$PWD/out BR2_DL_DIR=$PWD/dl 2>&1 | tail -n 200
+          test -f out/images/sdcard.img
+      - name: compress
+        run: |
+          xz -T0 -6 -c out/images/sdcard.img > spinos-rpi3.img.xz
+          sha256sum spinos-rpi3.img.xz > spinos-rpi3.img.xz.sha256
+          ls -la spinos-rpi3.img.xz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spinos-rpi3
+          path: |
+            spinos-rpi3.img.xz
+            spinos-rpi3.img.xz.sha256
+      - name: release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" spinos-rpi3.img.xz spinos-rpi3.img.xz.sha256 \
+            --title "SpinOS $GITHUB_REF_NAME" \
+            --notes "Образ для Raspberry Pi 3B. Записать через Raspberry Pi Imager: Use custom → spinos-rpi3.img.xz."

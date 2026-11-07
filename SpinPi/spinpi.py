@@ -3,19 +3,21 @@
 
 * web page on http://<pi>/ : drop a SpinSlicer video from a phone or PC, press Print
 * USB stick: plug it into the Pi, its videos appear on the printer screen and the web page
-* plays the video full-screen on the projector (mpv), black screen the rest of the time
+* the projector shows the frame that belongs to the vial's angle (SpinProj, C program): the ESP
+  counts every motor step, SpinPi forwards the angle 20 times a second, SpinProj puts up the
+  right frame on every vsync. Nothing can drift. (--engine mpv: the old way, video by time,
+  mpv's speed nudged to follow the motor)
 * talks to the SpinScreen ESP32 over USB: video list, print settings, progress, the QR code
-* keeps the video locked to the real vial angle: the ESP counts every motor step, SpinPi
-  compares that angle with the video position 4 times a second and nudges mpv's speed
 * projector calibration: centering offset (applied to every print) and vial width
 
-Only needs: python3, python3-serial, mpv, ffmpeg (ffprobe). See install.sh.
+Only needs: python3, python3-serial, ffmpeg (ffprobe), spinproj (or mpv). See install.sh.
 """
 import argparse
 import glob
 import hashlib
 import json
 import os
+import queue
 import re
 import socket
 import subprocess
@@ -30,12 +32,22 @@ except ImportError:  # still serve the web page without the ESP
     serial = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 VIDEO_EXT = (".mp4", ".mkv", ".mov", ".avi", ".webm")
 
 
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+
+def save_json(path, obj, **kw):
+    """Write to a temp file, fsync, rename: the power can go at any moment and the old file stays whole."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, **kw)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 # =============================================================================== ESP32 link
@@ -127,7 +139,7 @@ class Esp:
                 return False
 
     def query_pos(self, timeout=0.15):
-        """(angle_deg, rpm, at_speed, t_mid) where t_mid = middle of the round trip."""
+        """(angle_deg, rpm, at_speed, t_mid, rtt) where t_mid = middle of the round trip."""
         with self.pos_cv:
             self.pos = None
             t0 = time.monotonic()
@@ -137,13 +149,14 @@ class Esp:
             if self.pos is None:
                 return None
             a, r, ok, t1 = self.pos
-            return a, r, ok, (t0 + t1) / 2
+            return a, r, ok, (t0 + t1) / 2, t1 - t0
 
 
 # =============================================================================== mpv (projector)
 class Projector:
     """One mpv instance for the whole life of the service: idle = black full screen."""
 
+    engine = "mpv"
     # tried in order until mpv stays up (Raspberry Pi OS Lite has no desktop: mpv draws via DRM)
     FALLBACKS = [[], ["--vo=gpu", "--gpu-context=drm"], ["--vo=drm"]]
 
@@ -250,6 +263,104 @@ class Projector:
 
     def black(self):
         self.cmd("stop")
+
+
+# =============================================================================== SpinProj (projector by angle)
+class AngleProjector:
+    """SpinProj runs for the whole life of the service; we talk to it over its stdin/stdout.
+
+    Black whenever nothing else is asked for. If SpinPi dies, SpinProj sees its stdin close and
+    goes black; if the angle stops coming for 0.3 s while the light is on, it goes black by itself.
+    """
+
+    engine = "angle"
+
+    def __init__(self, exe, args):
+        self.cmdline = [exe] + list(args)
+        self.proc = None
+        self.lock = threading.Lock()
+        self.ok = False
+        self.err = ""
+        self.hz = None
+        self.size = None  # (w, h) of the projector, from READY
+        self.events = queue.Queue()  # (word, [fields]) for the print thread
+        self.stat = None
+        self.start()
+
+    def start(self):
+        try:
+            self.proc = subprocess.Popen(self.cmdline, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                                         bufsize=1, encoding="utf-8", errors="replace")
+        except OSError as e:
+            self.ok, self.err = False, f"spinproj: {e}"
+            log("projector:", self.err)
+            return
+        ready = threading.Event()
+        threading.Thread(target=self._read, args=(self.proc, ready), daemon=True).start()
+        if not ready.wait(5):
+            log("projector: spinproj did not say READY", self.err)
+
+    def _read(self, proc, ready):
+        for line in proc.stdout:
+            line = line.strip()
+            word, _, rest = line.partition(" ")
+            if word == "READY":
+                p = rest.split()
+                self.ok, self.err, self.hz = True, "", float(p[3])
+                self.size = (int(p[1]), int(p[2]))
+                log("projector: spinproj", rest)
+                ready.set()
+            elif word == "STAT":
+                self.stat = [float(x) for x in rest.split()]
+            elif word in ("ERR", "INFO"):
+                log("projector:", line)
+                if word == "ERR":
+                    self.err = rest
+            if word not in ("READY", "PONG"):
+                self.events.put((word, rest))
+        self.ok = False
+        self.err = self.err or "spinproj stopped"
+        log("projector: spinproj exited", proc.wait())
+        ready.set()
+        time.sleep(3)  # e.g. no projector on HDMI yet: try again
+        with self.lock:
+            if self.proc is proc:
+                self.start()
+
+    def send(self, line):
+        with self.lock:
+            if self.proc is None or self.proc.poll() is not None:
+                self.start()
+            try:
+                self.proc.stdin.write(line + "\n")
+                self.proc.stdin.flush()
+                return True
+            except (OSError, ValueError, AttributeError):
+                return False
+
+    def drain(self):
+        while not self.events.empty():
+            self.events.get_nowait()
+
+    def black(self):
+        self.send("BLACK")
+
+    def show_image(self, path):
+        self.send("IMAGE " + path)
+
+    def load(self, path, frames_per_turn, offset_px):
+        self.drain()
+        self.send(f"OFFSET {int(offset_px)}")
+        self.send(f"LOAD {int(frames_per_turn)} {path}")
+
+    def angle(self, deg, rpm, t_ns, rtt_ns=0):
+        self.send(f"A {deg:.4f} {rpm:.4f} {t_ns} {rtt_ns}")
+
+    def arm(self, turns):
+        self.send(f"ARM {turns}")
+
+    def stop(self):
+        self.send("STOP")
 
 
 # =============================================================================== projector test images
@@ -377,9 +488,7 @@ class Library:
         self.lock = threading.Lock()
 
     def _save(self):
-        tmp = self.meta_path + ".tmp"
-        json.dump(self.meta, open(tmp, "w"), indent=1)
-        os.replace(tmp, self.meta_path)
+        save_json(self.meta_path, self.meta, indent=1)
 
     def lib_path(self, name):
         return os.path.join(self.root, safe_name(name))
@@ -555,10 +664,11 @@ class UsbWatcher:
 class Warmup:
     """Lamp/LED output drifts for the first minutes. Count from the moment HDMI saw the projector."""
 
-    def __init__(self):
+    def __init__(self, watch=True):
         self.since = time.monotonic()  # unknown at start: assume it was switched on with the Pi
         self.connected = None
-        threading.Thread(target=self._run, daemon=True).start()
+        if watch:  # --hdmi ignore (PC tests): never say "not connected"
+            threading.Thread(target=self._run, daemon=True).start()
 
     @staticmethod
     def _status():
@@ -627,20 +737,24 @@ class Printer:
         self.motor_angle = 0.0
         self.pattern = "black"
         self.esp_list = []
+        self.angle_mode = getattr(proj, "engine", "mpv") == "angle"
+        self.last_pos = None  # (angle, rpm, at_speed, t_mid, received) from the job's angle feeder
 
     # ---- persistence
     def save_settings(self):
-        json.dump(self.settings, open(self.settings_path, "w"), indent=1)
+        save_json(self.settings_path, self.settings, indent=1)
 
     def save_history(self):
         self.history = self.history[-200:]
-        json.dump(self.history, open(self.history_path, "w"), indent=1, ensure_ascii=False)
+        save_json(self.history_path, self.history, indent=1, ensure_ascii=False)
 
     def busy(self):
         return self.state in ("wait", "print")
 
     # ---- exposure maths
     def cadence_ok(self, fps):
+        # the same for both engines: refreshes per frame = display Hz / video fps. Not a whole number
+        # (24 fps on 60 Hz) = frames take turns staying up 2 and 3 refreshes
         r = self.settings["display_fps"] / fps if fps else 0
         return r > 0 and abs(r - round(r)) < 0.02
 
@@ -665,7 +779,8 @@ class Printer:
              "hdmi": self.warm.connected, "warmup_left_s": left, "wait": self.wait,
              "sync_ms": self.sync_ms, "drops": self.drops, "motor_rpm": self.motor_rpm,
              "motor_angle": self.motor_angle % 360, "settings": self.settings, "pattern": self.pattern,
-             "history": self.history[-8:], "version": VERSION}
+             "history": self.history[-8:], "version": VERSION,
+             "engine": "angle" if self.angle_mode else "mpv"}
         if j:
             d["job"] = {k: j[k] for k in ("id", "file", "rpm", "revs", "time_s", "factor", "plan_revs")}
             d["job"].update(turn=j.get("turn", 0), left_s=j.get("left_s", j["time_s"]),
@@ -690,7 +805,7 @@ class Printer:
         self.job = dict(p, id=fid, file=f["name"], path=path, rpm=f["rpm"], rev_s=f["rev_s"], fps=f.get("fps"),
                         delay_s=delay_s)
         self.stop_flag.clear()
-        threading.Thread(target=self._run, daemon=True).start()
+        threading.Thread(target=self._run_angle if self.angle_mode else self._run, daemon=True).start()
         return None
 
     def stop(self):
@@ -882,6 +997,159 @@ class Printer:
             self.wait = None
             self.save_settings()
 
+    # ---- the job thread, projector by angle (SpinProj)
+    def _feed_angles(self, done):
+        """Ask the ESP for the angle 20 times a second and hand it to SpinProj, for the whole job."""
+        while not done.is_set():
+            p = self.esp.query_pos()
+            if p:
+                a, rpm, at_speed, t_mid, rtt = p
+                self.last_pos = (a, rpm, at_speed, t_mid, time.monotonic())
+                self.motor_angle, self.motor_rpm = a, rpm
+                self.proj.angle(a, rpm, int(t_mid * 1e9), int(rtt * 1e9))
+            time.sleep(0.05)
+
+    def _proj_event(self, timeout):
+        try:
+            return self.proj.events.get(timeout=timeout)
+        except queue.Empty:
+            return None, ""
+
+    def _run_angle(self):
+        j = self.job
+        e, pr = self.esp, self.proj
+        entry = {"t": time.strftime("%Y-%m-%d %H:%M"), "file": j["file"], "revs": j["revs"], "time_s": j["time_s"],
+                 "factor": j["factor"], "plan_revs": j["plan_revs"], "tolerance_pct": j["tolerance_pct"],
+                 "result": None, "engine": "angle"}
+        done = threading.Event()
+        try:
+            self.state, self.msg, self.sync_ms, self.drops, self.pattern = "wait", "", None, 0, "black"
+            self.last_pos = None
+            pr.black()
+            frames = max(1, round(j["rev_s"] * (j.get("fps") or 0)))
+            pr.load(j["path"], frames, self.settings["offset_px"])  # unpacks while the motor spins up
+            threading.Thread(target=self._feed_angles, args=(done,), daemon=True).start()
+            e.send("FILE " + j["file"].encode("utf-8")[:60].decode("utf-8", "ignore"))
+            e.send(f"TURNS {j['revs']}")
+            e.send(f"RPM {j['rpm']:.4f}")
+            e.send("SPIN 1")
+            e.send("STATE PRINT")
+            t0 = time.monotonic()
+            loaded = {}
+
+            def events_until_loaded():
+                while True:
+                    w, rest = self._proj_event(0)
+                    if w is None:
+                        return
+                    if w == "LOADED":
+                        loaded["info"] = rest
+                        log("frames ready:", rest)
+                    elif w == "ERR":
+                        raise PrintError("проектор: " + rest[:60])
+
+            # 1) motor up to speed (frames are being unpacked meanwhile)
+            def spin_left():
+                events_until_loaded()
+                p = self.last_pos
+                if p and p[2] and time.monotonic() - p[4] < 0.5:
+                    return 0
+                if time.monotonic() - t0 > 90:
+                    raise PrintError("мотор не набрал скорость")
+                return max(0.5, (j["rpm"] - (p[1] if p else 0)) / 6.0 + 0.5)
+
+            self._wait(spin_left, "spin")
+            # 2) projector warm-up, 3) the last frames, 4) dark spin for the resin
+            self._wait(lambda: (events_until_loaded(), self.warm.left(self.settings["warmup_min"]) or 0)[1], "warm")
+            said = False
+            while "info" not in loaded:
+                if not said:
+                    e.send("MSG Готовлю кадры…")
+                    said = True
+                if time.monotonic() - t0 > 600:
+                    raise PrintError("кадры не готовы за 10 минут")
+                self._wait(lambda: (events_until_loaded(), 0 if "info" in loaded else 1)[1], "spin")
+            t_dark = time.monotonic() + j["delay_s"]
+            self._wait(lambda: t_dark - time.monotonic(), "dark")
+            # 5) light: SpinProj shows frames by angle for exactly N turns, then goes black itself
+            pr.arm(j["revs"])
+            t_arm = time.monotonic()
+            w, rest = None, ""
+            while w not in ("LIGHT", "ERR") and time.monotonic() - t_arm < 2.0:
+                w, rest = self._proj_event(0.1)
+            if w != "LIGHT":
+                raise PrintError("проектор не включил свет: " + (rest or "нет ответа")[:50])
+            self.state = "print"
+            if pr.hz:
+                self.settings["display_fps"] = round(pr.hz, 3)
+            result = self._watch_light(j, done)
+            entry.update(result)
+            pr.black()
+            e.send("SPIN 0")
+            e.send("STATE DONE")
+            self.state = "done"
+            entry["drops"] = self.drops
+            entry["sync_ms"] = self.sync_ms
+            self.history.append(entry)
+            self.save_history()
+        except InterruptedError:
+            pr.stop()
+            pr.black()
+            e.send("SPIN 0")
+            e.send("STATE IDLE")
+            self.state = "idle"
+        except Exception as ex:  # noqa: BLE001
+            log("print error:", ex)
+            pr.stop()
+            pr.black()
+            e.send("SPIN 0")
+            e.send(f"STATE ERROR {str(ex)[:40]}")
+            self.state, self.msg = "error", str(ex)
+        finally:
+            done.set()
+            self.wait = None
+            self.save_settings()
+
+    def _watch_light(self, j, done):
+        """While the light is on: faults, progress for the screens. Returns dose numbers for the log."""
+        e, pr = self.esp, self.proj
+        total = j["revs"] * 360.0
+        last_msg = 0
+        while True:
+            if self.stop_flag.is_set():
+                raise InterruptedError
+            w, rest = self._proj_event(0.1)
+            if w == "DONE":
+                f = rest.split()
+                self.drops = int(f[1])
+                j.update(turn=j["revs"], left_s=0, progress=1.0)
+                e.send("PROG 100 0")
+                return {"flips": int(f[0]), "missed_vsync": int(f[1]), "dose_min": int(f[2]), "dose_max": int(f[3]),
+                        "dose_mean": float(f[4]), "fill_ms_max": float(f[5])}
+            if w == "ERR":
+                raise PrintError("проектор: " + rest[:60])
+            if w == "STOPPED":
+                raise InterruptedError
+            now = time.monotonic()
+            p = self.last_pos
+            if p is None or now - p[4] > 1.0:
+                raise PrintError("ESP не отвечает")
+            if abs(p[1] - j["rpm"]) > 0.05 * j["rpm"]:
+                raise PrintError(f"мотор: {p[1]:.2f} вместо {j['rpm']:.2f} об/мин")
+            st = pr.stat
+            if st:
+                deg, _flips, missed, _fill, resid = st[:5]
+                prog = max(0.0, min(1.0, deg / total))
+                left = (total - deg) / (j["rpm"] * 6.0)
+                self.drops, self.sync_ms = int(missed), resid
+                j.update(turn=min(j["revs"], int(prog * j["revs"]) + 1), left_s=left, progress=prog)
+                if now - last_msg > 0.5:
+                    last_msg = now
+                    e.send(f"PROG {100 * prog:.1f} {int(left + 0.99)}")
+                    e.send(f"SYNC {resid:.0f}")
+                    if self.drops:
+                        e.send(f"DROPS {self.drops}")
+
     def _expose(self, j, drops0):
         e = self.esp
         total_deg = j.get("angle0", 0.0) + j["revs"] * 360.0  # light ends exactly N turns after it started
@@ -903,7 +1171,7 @@ class Printer:
                     raise PrintError("ESP не отвечает")
                 continue
             last_ok = now
-            angle, rpm, _, t_m = p
+            angle, rpm, _, t_m = p[:4]
             self.motor_angle, self.motor_rpm = angle, rpm
             if abs(rpm - j["rpm"]) > 0.05 * j["rpm"]:
                 raise PrintError(f"мотор: {rpm:.2f} вместо {j['rpm']:.2f} об/мин")
@@ -984,6 +1252,54 @@ def wifi_name():
     return ""
 
 
+# =============================================================================== Wi-Fi (SpinOS)
+class Net:
+    """Home Wi-Fi or the printer's own access point. The work is done by the SpinOS script
+    `spinnet`; on a PC or on Raspberry Pi OS there is no such script and this does nothing."""
+
+    def __init__(self):
+        self.exe = next((p for p in ("/usr/sbin/spinnet", os.environ.get("SPINNET", "")) if p and os.path.exists(p)), "")
+
+    def _run(self, *args, timeout=20):
+        if not self.exe:
+            return ""
+        try:
+            return subprocess.run([self.exe, *args], capture_output=True, text=True, timeout=timeout).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+
+    def status(self):
+        """{"mode": "client"|"ap"|"none", "ssid": …, "ip": …, "ap_name": …}"""
+        d = {"available": bool(self.exe), "mode": "none"}
+        for line in self._run("status", timeout=5).splitlines():
+            k, _, v = line.partition("=")
+            if k:
+                d[k.strip()] = v.strip()
+        return d
+
+    def scan(self):
+        nets = []
+        for line in self._run("scan").splitlines():
+            sig, _, ssid = line.partition("\t")
+            if ssid and not any(n["ssid"] == ssid for n in nets):
+                nets.append({"ssid": ssid, "signal": float(sig or -100)})
+        return sorted(nets, key=lambda n: -n["signal"])
+
+    def connect(self, ssid, psk):
+        if not self.exe:
+            return "нет spinnet (это не SpinOS)"
+        if not ssid or len(ssid) > 32 or (psk and not 8 <= len(psk) <= 63):
+            return "имя сети до 32 символов, пароль 8–63 символа"
+        # in the background: the phone that asked is about to lose the access point
+        subprocess.Popen([self.exe, "connect", ssid, psk or ""], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        return None
+
+    def forget(self):
+        if self.exe:
+            subprocess.Popen([self.exe, "forget"], start_new_session=True)
+
+
 # =============================================================================== web server
 class Handler(BaseHTTPRequestHandler):
     app = None  # set in main()
@@ -1033,6 +1349,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(a.lib.list())
         if u.path == "/api/thumb":
             return self._file(a.lib.thumb_path(q.get("id", [""])[0]), "image/jpeg")
+        if u.path == "/api/wifi":
+            return self._json(dict(a.net.status(), networks=a.net.scan() if q.get("scan") else []))
         if u.path == "/api/events":  # Server-Sent Events: live state twice a second
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -1046,6 +1364,12 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(0.5)
             except OSError:
                 return
+        if a.ap_mode:  # captive portal: phones probe some URL on joining the printer's own Wi-Fi
+            self.send_response(302)
+            self.send_header("Location", "http://192.168.4.1/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         self._json({"error": "not found"}, 404)
 
     def do_PUT(self):  # upload: PUT /api/files/<name>, body = the video
@@ -1067,6 +1391,8 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 f.write(chunk)
                 left -= len(chunk)
+            f.flush()
+            os.fsync(f.fileno())
         if left:
             os.unlink(tmp)
             return self._json({"error": "upload interrupted"}, 400)
@@ -1117,6 +1443,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/projector":
             err = p.show_pattern(b.get("pattern", "black"))
             return self._json({"ok": err is None, "error": err})
+        if u.path == "/api/wifi":
+            if b.get("forget"):
+                a.net.forget()
+                return self._json({"ok": True})
+            err = a.net.connect(str(b.get("ssid", "")), str(b.get("psk", "")))
+            return self._json({"ok": err is None, "error": err})
         if u.path == "/api/calibration":
             p.calibrate(b.get("offset_px"), b.get("vial_px"))
             if b.get("show"):
@@ -1126,7 +1458,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class App:
-    pass
+    ap_mode = False
 
 
 def main():
@@ -1134,20 +1466,34 @@ def main():
     ap.add_argument("--port", type=int, default=80)
     ap.add_argument("--data", default="/var/lib/spinpi")
     ap.add_argument("--serial", default="", help="ESP serial port (default: auto)")
-    ap.add_argument("--projector", default="1280x800", help="projector resolution")
+    ap.add_argument("--projector", default="1280x800", help="projector resolution, or auto (SpinProj asks the HDMI)")
     ap.add_argument("--usb-dir", action="append", default=[], help="extra folder treated like a USB stick (tests)")
     ap.add_argument("--mpv-arg", action="append", default=[], help="extra mpv option, e.g. --mpv-arg=--vo=drm")
+    ap.add_argument("--engine", default="angle", choices=["angle", "mpv"],
+                    help="angle: SpinProj shows frames by the vial angle (default); mpv: the old video player")
+    ap.add_argument("--spinproj", default="", help="path to spinproj (default: next to spinpi.py, then $PATH)")
+    ap.add_argument("--spinproj-arg", action="append", default=[], help="extra spinproj option, e.g. --spinproj-arg=--rt")
+    ap.add_argument("--hdmi", default="watch", choices=["watch", "ignore"],
+                    help="ignore: do not look at the HDMI connector (tests on a PC)")
     args = ap.parse_args()
     os.makedirs(args.data, exist_ok=True)
-    pw, ph = (int(v) for v in args.projector.lower().split("x"))
+    pw, ph = (1280, 800) if args.projector == "auto" else (int(v) for v in args.projector.lower().split("x"))
 
     app = App()
     app.usb = UsbWatcher(extra_dirs=args.usb_dir)
     app.lib = Library(args.data, app.usb.dirs)
-    app.proj = Projector(os.path.join("/tmp", f"spinpi-mpv-{os.getpid()}.sock"), args.mpv_arg, pw)
+    if args.engine == "angle":
+        exe = args.spinproj or next((p for p in (os.path.join(HERE, "spinproj"), "/usr/bin/spinproj")
+                                     if os.path.exists(p)), "spinproj")
+        app.proj = AngleProjector(exe, ["--size", args.projector] + args.spinproj_arg)
+        if args.projector == "auto" and app.proj.size:
+            pw, ph = app.proj.size
+    else:
+        app.proj = Projector(os.path.join("/tmp", f"spinpi-mpv-{os.getpid()}.sock"), args.mpv_arg, pw)
     ref = {}
     app.esp = Esp(args.serial, lambda ev: ref["p"].on_esp_event(ev))
-    app.warm = Warmup()
+    app.warm = Warmup(watch=args.hdmi == "watch")
+    app.net = Net()
     app.printer = Printer(app.esp, app.proj, app.lib, args.data, pw, ph, app.warm)
     ref["p"] = app.printer
     threading.Thread(target=app.printer.poll_idle, daemon=True).start()
@@ -1158,7 +1504,15 @@ def main():
             host = socket.gethostname()
             url = f"http://{ip}" if args.port == 80 else f"http://{ip}:{args.port}"
             s = app.printer.settings
-            g = [f"URL {url}", f"HOST {host}.local", f"NET {wifi_name()}", f"CAL {s['offset_px']} {s['vial_px']}"]
+            st = app.net.status() if app.net.exe else {}
+            app.ap_mode = st.get("mode") == "ap"
+            if app.ap_mode:  # first start: the QR code joins the phone to the printer's own Wi-Fi
+                name = st.get("ap_name", "SpinSlicer")
+                g = [f"URL WIFI:T:nopass;S:{name};;", f"HOST 192.168.4.1", f"NET {name}",
+                     f"CAL {s['offset_px']} {s['vial_px']}", f"MSG Wi-Fi: {name}"]
+            else:
+                g = [f"URL {url}", f"HOST {host}.local", f"NET {st.get('ssid') or wifi_name()}",
+                     f"CAL {s['offset_px']} {s['vial_px']}"]
             if g != app.esp.greeting:
                 app.esp.greeting = g
                 app.esp.hello()
@@ -1169,7 +1523,7 @@ def main():
     Handler.app = app
     srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     srv.daemon_threads = True
-    log(f"SpinPi {VERSION} on port {args.port}, data in {args.data}")
+    log(f"SpinPi {VERSION} on port {args.port}, data in {args.data}, projector: {args.engine}")
     srv.serve_forever()
 
 

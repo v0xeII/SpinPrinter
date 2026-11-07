@@ -1,0 +1,2 @@
+source "$BR2_EXTERNAL_SPINOS_PATH/package/spinproj/Config.in"
+source "$BR2_EXTERNAL_SPINOS_PATH/package/spinpi/Config.in"

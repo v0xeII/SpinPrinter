@@ -24,7 +24,8 @@
 - `SpinScreen/`: прошивка, открывается в Arduino IDE (`SpinScreen.ino`)
 - `SpinScreen/config.h`: **все пины и настройки в одном месте**
 - `tools/pi_test.py`: притвориться Raspberry Pi с компьютера и проверить связь
-- `sim/`: симулятор интерфейса на ПК (для разработки)
+- `sim/`: интерфейс на ПК. `make virtual_esp`: **виртуальный ESP32** в окне (настоящий интерфейс,
+  кнопки, мотор, связь с SpinPi через виртуальный USB-порт); `sim` и `bench`: запись кадров и замер скорости
 - `SpinScreen/qrcodegen.*`: QR-коды, библиотека Project Nayuki (MIT)
 - `gen/make_fonts.py`: генератор шрифтов с кириллицей из шрифта [Onest](https://fonts.google.com/specimen/Onest) (лицензия SIL OFL): `python gen/make_fonts.py Onest[wght].ttf SpinScreen/fonts.h`
 

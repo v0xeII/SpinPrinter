@@ -4,9 +4,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-# root: needs port 80, the projector (DRM) and the USB serial port
+# root: needs port 80, the projector (DRM), the USB serial port and real-time priority for SpinProj
 ExecStartPre=-/bin/sh -c 'setterm --cursor off --blank force </dev/tty1 >/dev/tty1 2>&1'
-ExecStart=/usr/bin/python3 /opt/spinpi/spinpi.py --data /var/lib/spinpi --port 80 --projector 1280x800
+ExecStart=/usr/bin/python3 /opt/spinpi/spinpi.py --data /var/lib/spinpi --port 80 --projector 1280x800 --spinproj-arg=--rt --spinproj-arg=--cpu=3
+# the old video player instead:  ... --engine mpv
 Restart=always
 RestartSec=3
 

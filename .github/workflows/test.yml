@@ -1,0 +1,28 @@
+# On every push: build SpinProj and the virtual ESP32, run the whole-printer self-test (no hardware).
+name: test
+on:
+  push:
+  pull_request:
+jobs:
+  selftest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config liblz4-dev libdrm-dev libsdl2-dev ffmpeg python3-serial
+      - name: build (with and without SDL)
+        run: |
+          make -C SpinProj
+          make -C SpinProj NO_SDL=1 clean spinproj && make -C SpinProj clean spinproj
+          make -C SpinScreen_v0.7/sim virtual_esp
+      - name: SpinProj bench (null output, PC numbers, not the Pi's)
+        run: SpinProj/spinproj bench --out null --seconds 2
+      - name: self-test
+        run: python3 dev/selftest.py
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: selftest-log
+          path: dev/work/selftest/selftest.log

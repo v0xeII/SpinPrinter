@@ -1,0 +1,13 @@
+# built programs
+SpinProj/spinproj
+SpinScreen_v0.7/sim/virtual_esp
+SpinScreen_v0.7/sim/sim
+SpinScreen_v0.7/sim/bench
+*.o
+# test bench: generated videos, data, logs
+dev/work/
+__pycache__/
+# Buildroot output if built in the repo
+out/
+dl/
+buildroot-*/
