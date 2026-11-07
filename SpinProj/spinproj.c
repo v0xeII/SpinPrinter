@@ -11,7 +11,7 @@
 // before each flip.
 //
 // Talks to SpinPi over stdin/stdout, one line per command (see README.md):
-//   LOAD <frames per turn> <path> | IMAGE <file.pgm> | BLACK | OFFSET <px> | PHASE <deg>
+//   LOAD <frames per turn> <path> | IMAGE <file.pgm> | BLACK | OFFSET <px> | PHASE <deg> | REVERSE <0|1>
 //   A <angle deg> <rpm> <t ns> [round trip ns] | ARM <turns> | STOP | PING | QUIT
 // and answers READY / LOADING / LOADED / LIGHT / STAT / DONE / STOPPED / ERR / INFO lines.
 //
@@ -251,6 +251,7 @@ static struct {
   int img_w, img_h, img_id;
   int offset;
   double phase;  // forward angle that shows frame 0
+  int reverse;   // 1: the video was made for the other turning direction, frames go backwards
   Model m;
   double turns;  // ARM
   int loading;
@@ -358,6 +359,9 @@ static void command(char* line) {
     S.offset = atoi(line + 7);
   } else if (!strncmp(line, "PHASE ", 6)) {
     S.phase = atof(line + 6);
+  } else if (!strncmp(line, "REVERSE ", 8)) {
+    if (busy) emit("ERR идёт печать");
+    else S.reverse = atoi(line + 8) != 0;
   } else if (!strncmp(line, "ARM ", 4)) {
     double t = atof(line + 4);
     if (!S.fr) emit("ERR нет кадров (сначала LOAD)");
@@ -495,7 +499,8 @@ static int run(Out* o) {
         S.mode = M_BLACK;  // the turn boundary: this vsync is already dark
         ended = 1;
       } else {
-        double u = fmod(f - S.phase, 360.0);
+        // reversed: the angle the video counts runs against the motor, frame 0 still at PHASE
+        double u = fmod(S.reverse ? -f - S.phase : f - S.phase, 360.0);
         if (u < 0) u += 360.0;
         int idx = (int)(u / 360.0 * nfr);
         if (idx >= nfr) idx = nfr - 1;

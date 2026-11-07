@@ -4,7 +4,7 @@
 #
 ################################################################################
 
-SPINPI_VERSION = 0.5.0
+SPINPI_VERSION = 0.6.0
 SPINPI_SITE = $(BR2_EXTERNAL_SPINOS_PATH)/../SpinPi
 SPINPI_SITE_METHOD = local
 SPINPI_LICENSE = MIT

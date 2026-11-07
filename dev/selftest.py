@@ -9,9 +9,11 @@
   3. ESP «завис» посреди печати: свет гаснет, печать остановлена с ошибкой;
   4. «Стоп» со страницы посреди печати;
   5. тестовые картинки проектора;
-  6. первый запуск: своя Wi-Fi сеть, QR-код для телефона, выбор домашней сети (поддельный spinnet).
+  6. первый запуск: своя Wi-Fi сеть, QR-код для телефона, выбор домашней сети (поддельный spinnet);
+  7. файл .spin по Wi-Fi, нарезанный для другого направления: кадры в обратном порядке.
 Это проверка логики и связи. Реальное время проверяется только на самой Pi (spinproj bench).
 """
+import hashlib
 import http.client
 import json
 import os
@@ -19,6 +21,7 @@ import shutil
 import sys
 import time
 import urllib.request
+import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
@@ -183,6 +186,33 @@ def main():
         check("выбор домашней сети принят", r["ok"], r.get("error") or "")
         r = b.api("/api/wifi", {"ssid": "x", "psk": "123"})
         check("слишком короткий пароль отклонён", not r["ok"], r.get("error") or "")
+
+        print("\n7. Файл .spin по Wi-Fi, нарезан для вращения в другую сторону")
+        spin = os.path.join(b.dir, "reverse.spin")
+        video = open(os.path.join(b.usb, FILE), "rb").read()
+        meta = {"format": "spin", "version": 1, "name": "reverse",
+                "video": {"file": "video.mp4", "sha256": hashlib.sha256(video).hexdigest(), "frames": 120, "fps": 24,
+                          "width": 640, "height": 400, "frames_per_rev": 120, "rotation": "cw_from_top",
+                          "frame0_angle_deg": 30.0},
+                "plan": {"revolutions": 2.0, "tolerance_pct": 5.0}}
+        with zipfile.ZipFile(spin, "w", zipfile.ZIP_STORED) as z:
+            z.writestr("spin.json", json.dumps(meta))
+            z.writestr("video.mp4", video)
+        c = http.client.HTTPConnection("127.0.0.1", b.port, timeout=30)
+        c.request("PUT", "/api/files/reverse.spin", body=open(spin, "rb").read())
+        r = json.loads(c.getresponse().read())
+        check(".spin загружен", r.get("ok") and r["info"].get("reversed"), r.get("error") or "обратный ход")
+        r = b.api("/api/print", {"id": "lib/reverse.spin", "delay_s": 0.5})
+        check("печать .spin запущена", r["ok"], r.get("error") or "")
+        s = b.wait(lambda s: s["state"] in ("done", "error", "idle"), 40)
+        h = s["history"][-1]
+        check("2 оборота по расчёту, кадры в обратном порядке", s["state"] == "done" and h["revs"] == 2 and h.get("reversed"),
+              s["msg"] or f"{h.get('flips')} кадров")
+        lo, hi = h.get("dose_min", 0), h.get("dose_max", 99)
+        check("в обратном порядке каждый кадр тоже показан 2–3 обновления за оборот", lo >= 2 * 2 - 1 and hi <= 2 * 3 + 1,
+              f"от {lo} до {hi}")
+        check("журнал для SpinSlicer", b.api("/api/history")["prints"][-1]["file"] == "reverse.spin")
+        check("профиль принтера для SpinSlicer", b.api("/api/printer")["projector"]["width"] == 640)
     finally:
         b.close()
     bad = [n for n, ok in results if not ok]
