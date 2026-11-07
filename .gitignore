@@ -22,3 +22,6 @@ buildroot-*/
 
 # local tools
 .claude/
+
+# local editor notes
+CLAUDE.md
