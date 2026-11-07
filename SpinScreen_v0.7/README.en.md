@@ -106,7 +106,7 @@ to the bottom and sleeps after a minute without keys, dashes about on "Done!" an
 
 | Pi → ESP | does |
 |---|---|
-| `PING` | answers `PONG SpinScreen 0.7.2`; the Pi sends it every second |
+| `PING` | answers `PONG SpinScreen 0.7.1`; the Pi sends it every second |
 | `RPM 9.5` · `SPIN 1/0` | speed in rpm · motor on/off (with a ramp) |
 | `STATE PRINT/DONE/IDLE/ERROR text` · `PROG 42 80` | print state · progress 42 %, 80 s left |
 | `MSG text` | Spinny says it in a bubble |
