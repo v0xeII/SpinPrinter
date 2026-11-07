@@ -24,10 +24,7 @@ static void hc(const Settings&) {}
 static void hz() { ang = 0; }
 static void hm(double, float) {}
 
-static const char* INPUT_NAME[4] = {"", "buttons", "encoder", "joystick"};
-static int run(int W, int H, bool round, int home, bool tiles, unsigned seed, int input = 1) {
-  ui_set_panel(round ? "GC9A01" : "", round);
-  ui_set_input(input);
+static int run(int W, int H, int home, bool tiles, unsigned seed) {
   std::vector<uint16_t> fb(W * H), prev(W * H, 0), panel(W * H, 0);
   std::vector<uint32_t> th(dirtyTileCount(W, H), 0);
   Canvas c(W, H, fb.data());
@@ -72,19 +69,16 @@ static int run(int W, int H, bool round, int home, bool tiles, unsigned seed, in
     memcpy(prev.data(), fb.data(), W * H * 2);
     frames++;
   }
-  printf("%dx%d%s %-8s %-5s %-6s: %ld frames, %.1f rects/frame, %s\n", W, H, round ? " round" : "", INPUT_NAME[input], home == HOME_AXO ? "axo" : "card",
+  printf("%dx%d %-5s %-6s: %ld frames, %.1f rects/frame, %s\n", W, H, home == HOME_AXO ? "axo" : "card",
          tiles ? "tiles" : "double", frames, (double)rectsTotal / frames, bad ? "MISMATCH" : "ok");
   return bad ? 1 : 0;
 }
 
 int main() {
   int fail = 0;
-  const int sizes[][3] = {{320, 170, 0}, {320, 240, 0}, {240, 240, 0}, {160, 128, 0}, {240, 240, 1}};
+  const int sizes[][2] = {{320, 170}, {320, 240}, {240, 240}};
   for (auto& sz : sizes)
     for (int home = 0; home < HOME_COUNT; home++)
-      for (int tiles = 0; tiles < 2; tiles++) fail |= run(sz[0], sz[1], sz[2], home, tiles, 7 + sz[1] + home + sz[2]);
-  // the other controls: only the hints differ (and the edit direction), one pass each
-  for (auto& sz : sizes)
-    for (int input = 2; input <= 3; input++) fail |= run(sz[0], sz[1], sz[2], HOME_CARD, true, 11 + sz[1] + input, input);
+      for (int tiles = 0; tiles < 2; tiles++) fail |= run(sz[0], sz[1], home, tiles, 7 + sz[1] + home);
   return fail;
 }

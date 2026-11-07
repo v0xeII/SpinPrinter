@@ -7,7 +7,6 @@
 #include "config.h"
 #include "display.h"
 #include "gfx.h"
-#include "hw.h"
 #include "input.h"
 #include "motor.h"
 #include "ui.h"
@@ -16,32 +15,30 @@
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 
 static Preferences prefs;
-static HwConfig HW;          // the hardware this board has (hw.h): stored, or config.h's values
-static bool haveScreen = false;
-static char hwNote[96] = "";  // why the stored settings were not used, for READY / CONFIG?
 
 static MotorConfig toMotor(const Settings& s) {
   return MotorConfig{s.stepsRev, s.micro, s.gear, s.accel, s.dirInv != 0};
 }
-// The Pi can be on the USB cable or on three wires (UART: pi_rx / pi_tx, GPIO44 / 43). Both are
+// The Pi can be on the USB cable or on three wires (UART: GPIO44 RX, GPIO43 TX). Both are
 // listened to all the time; answers go where the Pi's PING last came from (before the first
 // PING: to both). So either way works, and switching from one to the other needs nothing.
 struct Link {
   Stream* io;
-  char buf[400];  // CONFIG lines are long
+  char buf[128];
   int n;
   bool junk;  // this line had bytes no Pi sends (a floating wire): dropped
 };
 static Link links[2] = {{&Serial, {0}, 0, false}, {&Serial0, {0}, 0, false}};
-static int nLinks = 1;            // 2 when the UART pins are set (pi_rx / pi_tx), else USB only
+// PIN_PI_RX -1: the UART pins are used by something else (breadboard layout), USB only
+static const int NLINKS = PIN_PI_RX >= 0 ? 2 : 1;
 static volatile int active = -1;  // index into links, -1 = not known yet
 
 // one write() per line, so lines never interleave
 static void sendLine(const char* line) {
-  char b[480];
+  char b[160];
   int n = snprintf(b, sizeof b - 1, "%s\n", line);
   if (n > (int)sizeof b - 2) n = sizeof b - 2;
-  for (int i = 0; i < nLinks; i++)
+  for (int i = 0; i < NLINKS; i++)
     if (active < 0 || active == i) links[i].io->write((const uint8_t*)b, n);
 }
 // Lines from the UI go out through the serial task. A USB write can block for ~100 ms when the
@@ -82,63 +79,8 @@ static void hSend(const char* line) {
   if (txq) xQueueSend(txq, &l, 0);
 }
 
-// CONFIG: the hardware settings (hw.h). Handled here in the serial task, so it works even when
-// the screen did not start (wrong panel or pins): that is exactly when it is needed.
-//   CONFIG?                  the settings now:  CONFIG panel=st7789_170x320 rot=1 ...
-//   CONFIG key=value ...     change some, store them, reboot  (CONFIG SAVED ..., then READY ...)
-//   CONFIG RESET             forget them, reboot with the values from config.h
-//   CONFIG TRY key=value ... only check: CONFIG OK ... or ERR CONFIG ...
-static void rebootSoon() {
-  Serial.flush();
-  delay(300);  // let the answer leave over USB before the port goes away
-  ESP.restart();
-}
-static void handleConfig(const char* a) {
-  char out[440];
-  while (*a == ' ') a++;
-  if (!strcmp(a, "?") || !*a) {
-    int n = snprintf(out, sizeof out, "CONFIG ");
-    hw_format(HW, out + n, sizeof out - n);
-    sendLine(out);
-    if (hwNote[0]) sendLine(hwNote);
-    return;
-  }
-  if (!strcmp(a, "RESET")) {
-    prefs.remove("hw");
-    sendLine("CONFIG RESET, rebooting");
-    rebootSoon();
-    return;
-  }
-  bool dry = !strncmp(a, "TRY ", 4);
-  if (dry) a += 4;
-  // the new settings = what is used now + these keys (so a CONFIG can change just one thing)
-  HwConfig c = HW;
-  const char* err = hw_apply(c, a);
-  if (!err) err = hw_check(c);
-  if (err) {
-    snprintf(out, sizeof out, "ERR CONFIG %s", err);
-    sendLine(out);
-    return;
-  }
-  int n = snprintf(out, sizeof out, dry ? "CONFIG OK " : "CONFIG SAVED ");
-  hw_format(c, out + n, sizeof out - n);
-  if (dry) { sendLine(out); return; }
-  prefs.putString("hw", out + n);  // the full line: keys added by later versions just add on
-  sendLine(out);
-  rebootSoon();
-}
-
 // a whole line from link k: answer the time-critical ones here, queue the rest for the UI
 static void handleLine(int k, const char* buf) {
-  if (!strncmp(buf, "CONFIG", 6) && (buf[6] == 0 || buf[6] == ' ' || buf[6] == '?')) {
-    handleConfig(buf + 6);
-    return;
-  }
-  if (!haveScreen) {  // no UI to hand the rest to: say why
-    if (!strcmp(buf, "PING")) sendLine("PONG SpinScreen " FW_VERSION);  // (SpinPi reads the version as the last word)
-    else sendLine("ERR no screen: check CONFIG? (panel and pins)");
-    return;
-  }
   if (!strcmp(buf, "PING")) active = k;  // the Pi is on this one
   if (!strcmp(buf, "POS")) {  // time-critical: answer right here
     char out[64];
@@ -169,7 +111,7 @@ static void serialTask(void*) {
   for (;;) {
     Line out;
     while (xQueueReceive(txq, &out, 0) == pdTRUE) sendLine(out.s);
-    for (int k = 0; k < nLinks; k++) {
+    for (int k = 0; k < NLINKS; k++) {
       Link& L = links[k];
       while (L.io->available()) {
         uint8_t ch = (uint8_t)L.io->read();
@@ -192,23 +134,11 @@ static void serialTask(void*) {
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
+#if PIN_PI_RX >= 0
+  Serial0.begin(SERIAL_BAUD, SERIAL_8N1, PIN_PI_RX, PIN_PI_TX);  // the three-wire link
+  gpio_pullup_en((gpio_num_t)PIN_PI_RX);  // no wire on RX: idle high, not noise
+#endif
   prefs.begin("spinscreen", false);
-  // the hardware: stored by CONFIG, else config.h. Settings that do not pass the checks (an
-  // older firmware stored them, or by hand) are not used: the board starts with config.h's.
-  hw_defaults(HW);
-  String stored = prefs.getString("hw", "");
-  if (stored.length()) {
-    HwConfig c = HW;
-    const char* err = hw_apply(c, stored.c_str());
-    if (!err) err = hw_check(c);
-    if (err) snprintf(hwNote, sizeof hwNote, "ERR CONFIG stored settings not used: %s", err);
-    else HW = c;
-  }
-  if (HW.piRx >= 0) {
-    Serial0.begin(SERIAL_BAUD, SERIAL_8N1, HW.piRx, HW.piTx);  // the three-wire link
-    gpio_pullup_en((gpio_num_t)HW.piRx);  // no wire on RX: idle high, not noise
-    nLinks = 2;
-  }
   Settings s;
   s.rpm = prefs.getFloat("rpm", RPM_DEFAULT);
   s.lang = prefs.getUChar("lang", 0);
@@ -223,40 +153,23 @@ void setup() {
   if (s.home >= HOME_COUNT) s.home = HOME_CARD;
   s.axoColor = prefs.getUChar("axoColor", 0);
 
-  motor_init(toMotor(s), HW.step, HW.dir, HW.en);
-  input_init(HW);
+  motor_init(toMotor(s));
+  input_init();
+  if (!display_init()) {
+    while (true) {
+      Serial.println("ERR display init failed");
+      delay(1000);
+    }
+  }
+  UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove};
+  ui_init(hal, s, millis());
   lines = xQueueCreate(16, sizeof(Line));
   txq = xQueueCreate(24, sizeof(Line));
-  haveScreen = display_init(HW);
-  if (haveScreen) {
-    UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove};
-    const PanelInfo& p = hw_panel(HW.panel);
-    ui_set_panel(p.name, p.round);
-    ui_set_input(HW.input);
-    ui_init(hal, s, millis());
-  }
-  // the serial task runs either way: without a screen, CONFIG can still fix the settings
-  xTaskCreatePinnedToCore(serialTask, "serial", 6144, nullptr, 5, nullptr, 0);
-  char b[160];
-  int w, h;
-  hw_screen_size(HW, w, h);
-  snprintf(b, sizeof b, "READY SpinScreen " FW_VERSION " %s %dx%d %s%s", hw_panel(HW.panel).key, w, h,
-           HW.input == IN_ENCODER ? "encoder" : (HW.input == IN_JOYSTICK ? "joystick" : "buttons"),
-           haveScreen ? "" : " noscreen");
-  sendLine(b);
-  if (hwNote[0]) sendLine(hwNote);
+  xTaskCreatePinnedToCore(serialTask, "serial", 4096, nullptr, 5, nullptr, 0);
+  sendLine("READY SpinScreen " FW_VERSION);
 }
 
 void loop() {
-  if (!haveScreen) {  // wrong panel or pins, or no RAM: keep saying so, CONFIG fixes it
-    static uint32_t lastSay = 0;
-    if (millis() - lastSay > 3000) {
-      lastSay = millis();
-      hSend("ERR display init failed: check CONFIG? (panel and pins)");
-    }
-    delay(20);
-    return;
-  }
   Line l;
   while (xQueueReceive(lines, &l, 0) == pdTRUE) ui_line(l.s, millis());
   bool pressed = false;
@@ -293,7 +206,7 @@ void loop() {
   nextUs = frameT + period;
 
   uint32_t t0 = micros();
-  Canvas c(display_width(), display_height(), display_buffer());
+  Canvas c(DISPLAY_W, DISPLAY_H, display_buffer());
   wantFps = ui_frame(c, (uint32_t)(frameT / 1000), (frameT % 1000) / 1000.f);
   uint32_t t1 = micros();
   uint32_t bytes = display_push();

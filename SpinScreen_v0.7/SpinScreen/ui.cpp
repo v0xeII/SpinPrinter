@@ -169,55 +169,25 @@ static bool stopping = false;
 struct Particle { float x, y, vx, vy, r; uint16_t c; };
 static Particle conf[48];
 
-// Rows of the lists. Smaller on the 160x128 screen.
-static int ROW_H = 30, PILL_H = 26, ROW_PAD = 13, ROW_TY = 6;  // row pitch, pill height, text inset, baseline
-static const Font* FR = &F_MD;    // row text
-static const Font* FBIG = &F_LG;  // headings
-static const Font* FVAL = &F_XL;  // the number on the edit card
+static const int ROW_H = 30;
 
-// ---- layout. Worked out from the screen size (and whether the glass is round):
-//  wide    320x170, 320x240: Spinny / dial on the left, the list on the right
-//  square  240x240:          Spinny / dial in a band at the top, the list below
-//  compact 160x128:          the same as square, everything smaller (one row font, no QR text)
-//  round   240x240 GC9A01:   the corners are off the glass. The list is a wheel (the chosen row in
-//                            the middle, the others turn away above and below), the print progress
-//                            runs as a ring round the edge, and everything else is centred.
-//  Without Spinny (Кастомизация → Главная → Карточка) the list takes his place, animated.
+// ---- layout. Worked out from the screen size: 320x170 ("wide") or 240x240 ("square").
+//  wide:   Spinny / dial on the left, the list on the right
+//  square: Spinny / dial in a band at the top, the list below
+//  Without Spinny (Сервис → Аксолотль → выкл) the list takes his place, animated.
 struct Lay {
   int W = 0, H = 0;
-  bool sq = false;       // stacked: Spinny above the list (square, compact, round)
-  bool compact = false;  // 160x128
-  bool round = false;    // round glass
+  bool sq = false;
   float artX0, artX1, artY0, artY1, artCx, artCy, dialR, spinS;  // Spinny / dial / QR area
   float lx[2], lw[2], ltop[2], lclip[2];                         // list: [0] beside Spinny, [1] without
   int vis[2];
 };
 static Lay L;
-static bool roundPanel = false;  // ui_set_panel()
-static char panelName[32] = "";
 static void layout(int W, int H) {
   L.W = W;
   L.H = H;
-  L.round = roundPanel && W == H;
-  L.compact = !L.round && (W < 200 || H < 150);
-  L.sq = L.round || L.compact || H > W * 0.75f;
-  ROW_H = 30; PILL_H = 26; ROW_PAD = 13; ROW_TY = 6;
-  FR = &F_MD; FBIG = &F_LG; FVAL = &F_XL;
-  if (L.round) {
-    L.artX0 = 40; L.artX1 = W - 40.f; L.artY0 = 30; L.artY1 = 118;
-    L.artCx = W / 2.f; L.artCy = 84; L.dialR = 32; L.spinS = 0.7f;
-    L.lx[0] = L.lx[1] = 28; L.lw[0] = L.lw[1] = W - 56.f;
-    L.ltop[0] = 172; L.ltop[1] = H / 2.f; L.lclip[0] = 120; L.lclip[1] = 30;  // ltop: the wheel's centre
-    L.vis[0] = 3; L.vis[1] = 5;
-  } else if (L.compact) {
-    ROW_H = 21; PILL_H = 18; ROW_PAD = 8; ROW_TY = 5;
-    FR = &F_SM; FBIG = &F_MD; FVAL = &F_LG;
-    L.artX0 = 0; L.artX1 = (float)W; L.artY0 = 18; L.artY1 = 56;
-    L.artCx = 26; L.artCy = 37; L.dialR = 17; L.spinS = 0.42f;
-    L.lx[0] = L.lx[1] = 4; L.lw[0] = L.lw[1] = W - 8.f;
-    L.ltop[0] = 68; L.ltop[1] = 30; L.lclip[0] = 57; L.lclip[1] = 18;
-    L.vis[0] = (H - 57) / ROW_H; L.vis[1] = (H - 18) / ROW_H;
-  } else if (!L.sq) {
+  L.sq = H > W * 0.75f;
+  if (!L.sq) {
     L.artX0 = 0; L.artX1 = 122; L.artY0 = 26; L.artY1 = (float)H;
     L.artCx = 62; L.artCy = 26 + (H - 26) * 0.51f; L.dialR = 44; L.spinS = 0.8f;
     L.lx[0] = 122; L.lw[0] = W - 128.f; L.lx[1] = 8; L.lw[1] = W - 16.f;
@@ -256,30 +226,6 @@ static float frand(float a, float b) {
 static float renderMs = 0, pushKB = 0, drawMsAvg = 0;
 
 static const char* T(Str s) { return STR[S.lang][s]; }
-
-// ---- the controls (ui_set_input): the hints say what to do with the device on this board.
-//  buttons:  ↑ ↓ OK, hold OK = back
-//  encoder:  turn = move (clockwise = down the list, and = more while editing), press = OK, hold = back
-//  joystick: up / down = move (repeats while held), right or press = OK, left = back
-static int inputMode = 1;  // 1 buttons, 2 encoder, 3 joystick (hw.h IN_*)
-struct HintSet { Str s; const char* txt[2][2]; };  // [encoder, joystick][ru, en]
-static const HintSet HINTS[] = {
-    {S_SURE_HINT, {{"нажми — да · держи — нет", "press = yes · hold = no"}, {"→ да · ← нет", "→ yes · ← no"}}},
-    {S_SETUP_HINT, {{"крути — выбор · нажми · держи — назад", "turn = select · press · hold = back"},
-                    {"↑↓ выбор · → OK · ← назад", "↑↓ select · → OK · ← back"}}},
-    {S_HOLD_STOP, {{"держи кнопку — стоп", "hold the knob to stop"}, {"← — стоп", "← = stop"}}},
-    {S_HINT_FINE, {{"крути · быстро — крупнее", "turn · fast = bigger"},
-                   {"↑↓ шаг · держи — быстрее", "↑↓ step · hold = faster"}}},
-    {S_HINT, {{"крути · нажми — готово", "turn · press = done"},
-              {"↑↓ изменить · → готово", "↑↓ change · → done"}}},
-    {S_BACK_HINT, {{"держи кнопку — назад", "hold the knob to go back"}, {"← назад", "← back"}}},
-};
-static const char* HT(Str s) {  // a hint about the controls
-  if (inputMode == 2 || inputMode == 3)
-    for (auto& h : HINTS)
-      if (h.s == s) return h.txt[inputMode - 2][S.lang ? 1 : 0];
-  return T(s);
-}
 static bool piOk() { return everRx && (now - lastRx) * 1000.f < PI_TIMEOUT_MS; }
 
 static void say(const char* txt, float secs = 1.8f) {
@@ -649,7 +595,6 @@ void ui_key(Key k, uint32_t nowMs) {
     return;
   }
   if (editing) {
-    if (inputMode == 2 && (k == K_UP || k == K_DOWN)) k = k == K_UP ? K_DOWN : K_UP;  // knob: clockwise = more
     if (k == K_UP) changeValue(editItem, +1);
     else if (k == K_DOWN) changeValue(editItem, -1);
     else { endEdit(); hop(); }
@@ -687,7 +632,7 @@ void ui_key(Key k, uint32_t nowMs) {
     }
     case SC_PRINT:
       if (k == K_BACK && !stopping) { stopping = true; H.send("EV STOP"); }
-      else if (k == K_OK) say(HT(S_HOLD_STOP), 1.5f);
+      else if (k == K_OK) say(T(S_HOLD_STOP), 1.5f);
       break;
     case SC_DONE:
       if (k == K_UP || k == K_DOWN) {  // left / right through the three answers
@@ -893,42 +838,25 @@ static void drawLogo(Canvas& c, float cx, float cy, float sz, float a, float rot
 
 // The card, across the top of the main page (shorter on 170 px high screens).
 static void cardRect(float& x, float& y, float& w, float& h) {
-  if (L.round) { x = 36; y = 34; w = L.W - 72.f; h = 76; return; }
-  if (L.compact) { x = 4; y = 21; w = L.W - 8.f; h = 40; return; }
   x = 8; y = 32; w = L.W - 16.f; h = L.H < 200 ? 58.f : 76.f;
 }
 
 // Main page with Кастомизация → Главная → Карточка: "Печать" (the first item of the main page) is
-// a big card across the top, the list under it shows the rest. sel = how selected the card is
+// a big card on the left, the list on the right shows the rest. sel = how selected the card is
 // (0..1, follows the pill as it slides up into the card).
 static void drawHomeCard(Canvas& c, float a, float sel) {
   if (a <= 0.01f) return;
   float x, y, w, h;
   cardRect(x, y, w, h);
   x += (1 - a) * -16;
-  float rr = L.round ? 26 : (L.compact ? 10 : 16);
   // no pulse and no glow: a still card costs nothing over SPI (a pulsing one resent ~50 KB a frame)
-  c.fillRoundRect(x, y, w, h, rr, lerpColor(PANEL, PINK, sel), a);
-  c.strokeRoundRect(x, y, w, h, rr, 1.5f, lerpColor(hex(0x5A3346), HOT, sel), a);
+  c.fillRoundRect(x, y, w, h, 16, lerpColor(PANEL, PINK, sel), a);
+  c.strokeRoundRect(x, y, w, h, 16, 1.5f, lerpColor(hex(0x5A3346), HOT, sel), a);
   uint16_t ink = lerpColor(PINK, DARK, sel), sub = lerpColor(DIM, hex(0x5A2A3E), sel);
   char b[48], s2[48];
   if (!piOk()) snprintf(b, sizeof b, "%s", T(S_PI_NO));
   else if (knownVideos > 0) snprintf(b, sizeof b, "%s: %d", T(S_FILES), knownVideos);
   else snprintf(b, sizeof b, "%s", T(S_CARD_PICK));
-  if (L.round) {  // centred: the sides of the card run along the curve
-    int cx = (int)(x + w / 2);
-    c.textCentered(F_LG, cx, (int)(y + 42), T(S_PRINT_BTN), ink, a);
-    fitText(F_SM, b, s2, sizeof s2, (int)w - 40);
-    c.textCentered(F_SM, cx, (int)(y + 62), s2, sub, a);
-    return;
-  }
-  if (L.compact) {
-    c.text(F_MD, (int)(x + 10), (int)(y + 20), T(S_PRINT_BTN), ink, a);
-    fitText(F_SM, b, s2, sizeof s2, (int)w - 40);
-    c.text(F_SM, (int)(x + 10), (int)(y + 35), s2, sub, a);
-    c.text(F_MD, (int)(x + w - 26), (int)(y + 27), "→", ink, a);
-    return;
-  }
   c.text(F_LG, (int)(x + 18), (int)(y + h * 0.47f), T(S_PRINT_BTN), ink, a);
   fitText(F_SM, b, s2, sizeof s2, (int)w - 70);
   c.text(F_SM, (int)(x + 18), (int)(y + h * 0.78f), s2, sub, a);
@@ -937,40 +865,23 @@ static void drawHomeCard(Canvas& c, float a, float sel) {
 
 // ================================================================ drawing pieces
 static void drawTopBar(Canvas& c) {
+  c.text(F_SM, 12, 17, "SpinSlicer", PINK);
   bool ok = piOk();
   const char* pt = ok ? T(S_PI_OK) : T(S_PI_NO);
-  float rpm = H.motorRpm();
-  bool spin = rpm > 0.005f || motorOn;
-  char r[16];
-  fmt2(r, sizeof r, rpm);
-  if (L.round) {  // one pill in the middle at the top: the corners are off the glass
-    int tw = Canvas::textWidth(F_SM, pt), rw = spin ? Canvas::textWidth(F_SM, r) + 26 : 0;
-    int w = tw + 24 + rw, x = L.W / 2 - w / 2, y = 11;
-    c.fillRoundRect(x, y, w, 17, 8.5f, PANEL);
-    c.fillCircle(x + 10, y + 8.5f, 3.2f, ok ? PINK : FAINT, ok ? 0.6f + 0.4f * sinf(now * 3) : 1);
-    c.text(F_SM, x + 17, y + 13, pt, ok ? LIGHT : DIM);
-    if (spin) {
-      float a = angleNow() * 0.0174533f, mx = x + tw + 34;
-      c.ring(mx, y + 8, 5, 1.6f, FAINT);
-      c.fillCircle(mx + cosf(a) * 5, y + 8 + sinf(a) * 5, 1.9f, PINK);
-      c.text(F_SM, (int)mx + 9, y + 13, r, LIGHT);
-    }
-    return;
-  }
-  int dy = L.compact ? -4 : 0;  // the 160x128 bar is 18 px high
-  bool title = !(L.compact && spin);  // no room for both there
-  if (title) c.text(F_SM, L.compact ? 5 : 12, 17 + dy, "SpinSlicer", PINK);
   int w = Canvas::textWidth(F_SM, pt) + 24;
-  int x = L.W - (L.compact ? 4 : 8) - w;
-  c.fillRoundRect(x, 5 + dy, w, 17, 8.5f, PANEL);
-  c.fillCircle(x + 10, 13.5f + dy, 3.2f, ok ? PINK : FAINT, ok ? 0.6f + 0.4f * sinf(now * 3) : 1);
-  c.text(F_SM, x + 17, 18 + dy, pt, ok ? LIGHT : DIM);
-  if (spin) {
+  int x = L.W - 8 - w;
+  c.fillRoundRect(x, 5, w, 17, 8.5f, PANEL);
+  c.fillCircle(x + 10, 13.5f, 3.2f, ok ? PINK : FAINT, ok ? 0.6f + 0.4f * sinf(now * 3) : 1);
+  c.text(F_SM, x + 17, 18, pt, ok ? LIGHT : DIM);
+  float rpm = H.motorRpm();
+  if (rpm > 0.005f || motorOn) {
+    char r[16];
+    fmt2(r, sizeof r, rpm);
     int mx = x - 12 - Canvas::textWidth(F_SM, r);
-    c.text(F_SM, mx, 18 + dy, r, LIGHT);
+    c.text(F_SM, mx, 18, r, LIGHT);
     float a = angleNow() * 0.0174533f;
-    c.ring(mx - 10, 13 + dy, 5, 1.6f, FAINT);
-    c.fillCircle(mx - 10 + cosf(a) * 5, 13 + dy + sinf(a) * 5, 1.9f, PINK);
+    c.ring(mx - 10, 13, 5, 1.6f, FAINT);
+    c.fillCircle(mx - 10 + cosf(a) * 5, 13 + sinf(a) * 5, 1.9f, PINK);
   }
 }
 
@@ -978,10 +889,10 @@ static void drawToast(Canvas& c) {
   if (toast.v < 0.02f || !toastText[0]) return;
   float a = clampf(toast.v, 0, 1);
   char t[64];
-  fitText(F_SM, toastText, t, sizeof t, L.round ? 150 : L.W - (L.compact ? 28 : 60));
+  fitText(F_SM, toastText, t, sizeof t, L.W - 60);
   int tw = Canvas::textWidth(F_SM, t);
   float w = tw + 24, h = 20;
-  float x = L.W / 2.f + (L.sq ? 0 : 8) - w / 2, y = (L.round ? 32 : (L.compact ? 0 : 3.5f)) - (1 - a) * 22;
+  float x = L.W / 2.f + 8 - w / 2, y = 3.5f - (1 - a) * 22;
   if (x < 4) x = 4;
   c.fillRoundRect(x, y, w, h, 10, PANEL, a);
   c.strokeRoundRect(x, y, w, h, 10, 1, HOT, a * 0.8f);
@@ -1009,13 +920,7 @@ static void drawDial(Canvas& c, float cx, float cy, float R, float alpha, bool n
   float mx = cx + cosf(ang) * R, my = cy + sinf(ang) * R;
   c.glow(mx, my, 10, HOT, 0.8f * alpha);
   c.fillCircle(mx, my, 3.4f, LIGHT, alpha);
-  if (numbers && R < 24) {  // too small for the number inside (160x128): beside it
-    char r[16];
-    fmt2(r, sizeof r, rpm);
-    int tx = (int)(cx + R + 10);
-    tx = c.text(F_MD, tx, (int)cy + 6, r, LIGHT, alpha);
-    c.text(F_SM, tx + 4, (int)cy + 6, T(S_RPM), DIM, alpha);
-  } else if (numbers) {
+  if (numbers) {
     char r[16];
     fmt2(r, sizeof r, rpm);
     c.textCentered(F_MD, (int)cx, (int)cy + 4, r, LIGHT, alpha);
@@ -1027,21 +932,18 @@ static void drawDial(Canvas& c, float cx, float cy, float R, float alpha, bool n
 static void drawEditCard(Canvas& c, float fx, float fy, float fw, float tx, float ty, float tw, float th, float alpha) {
   float e = clampf(edit.v, 0, 1.15f);
   if (e < 0.01f) return;
-  float x = fx + (tx - fx) * e, y = fy + (ty - fy) * e, w = fw + (tw - fw) * e, h = PILL_H + (th - PILL_H) * e;
+  float x = fx + (tx - fx) * e, y = fy + (ty - fy) * e, w = fw + (tw - fw) * e, h = 26 + (th - 26) * e;
   int ocx0 = c.cx0, ocy0 = c.cy0, ocx1 = c.cx1, ocy1 = c.cy1;
   c.noClip();
-  float rr = PILL_H / 2.f + (L.round ? 31 : (L.compact ? 1 : 5)) * clampf(e, 0, 1);
-  c.fillRoundRect(x, y, w, h, rr, PINK, alpha);
-  int txw = (int)w - (L.round ? 40 : 12);  // text width (the round card's corners are deep)
-  int t0 = L.compact ? 15 : 20;           // the title's baseline below the top
+  c.fillRoundRect(x, y, w, h, 13 + 5 * clampf(e, 0, 1), PINK, alpha);
   float ia = alpha * clampf((e - 0.55f) / 0.45f, 0, 1);
   if (ia < 0.01f) { c.clip(ocx0, ocy0, ocx1, ocy1); return; }
   ItemId it = editItem;
   int cx = (int)(x + w / 2);
-  c.textCentered(F_SM, cx, (int)(y + t0), T(ITEM_NAME[it]), DARK, ia * 0.7f);
+  c.textCentered(F_SM, cx, (int)(y + 20), T(ITEM_NAME[it]), DARK, ia * 0.7f);
   char v[20], sub[48] = "";
   const char* unit = "";
-  const char* hint = HT(S_HINT);
+  const char* hint = T(S_HINT);
   switch (it) {
     case I_SU_TURNS: {
       FileEntry& f = files[suFile];
@@ -1057,7 +959,7 @@ static void drawEditCard(Canvas& c, float fx, float fy, float fw, float tx, floa
       float r = S.rpm;
       fmt2(v, sizeof v, r);
       unit = T(S_RPM);
-      hint = HT(S_HINT_FINE);
+      hint = T(S_HINT_FINE);
       snprintf(sub, sizeof sub, "%.1f %s  ·  %.2f %s", (double)(r * 6.f), T(S_DEG_S), (double)(60.f / r), T(S_SEC_REV));
       break;
     }
@@ -1087,22 +989,20 @@ static void drawEditCard(Canvas& c, float fx, float fy, float fw, float tx, floa
   float off = bump.v * 14 * bumpDir;
   float va = ia * clampf(1 - fabsf(bump.v) * 0.8f, 0, 1);
   float vy = y + h * 0.52f;  // proportions of the card, so it fits any screen
-  c.clip((int)x, (int)y + t0 + 4, (int)(x + w), (int)(y + h * 0.64f));
-  c.textCentered(*FVAL, cx, (int)(vy + off), v, DARK, va);
+  c.clip((int)x, (int)y + 24, (int)(x + w), (int)(y + h * 0.64f));
+  c.textCentered(F_XL, cx, (int)(vy + off), v, DARK, va);
   c.noClip();
   c.textCentered(F_SM, cx, (int)(y + h * 0.65f), unit, DARK, ia * 0.8f);
   char sb[48];
-  fitText(F_SM, sub, sb, sizeof sb, txw);
+  fitText(F_SM, sub, sb, sizeof sb, (int)w - 12);
   if (sb[0]) c.textCentered(F_SM, cx, (int)(y + h * 0.78f), sb, DARK, ia * 0.75f);
-  fitText(F_SM, hint, sb, sizeof sb, txw);
+  fitText(F_SM, hint, sb, sizeof sb, (int)w - 12);
   c.textCentered(F_SM, cx, (int)(y + h * 0.93f), sb, DARK, ia * 0.5f);
   c.clip(ocx0, ocy0, ocx1, ocy1);
 }
 
 static void editTarget(float& x, float& y, float& w, float& h) {
-  if (L.round) { x = 30; y = 34; w = L.W - 60.f; h = L.H - 68.f; }  // inside the circle
-  else if (L.compact) { x = 4; y = 20; w = L.W - 8.f; h = L.H - 24.f; }
-  else if (L.sq) { x = 8; y = 30; w = L.W - 16.f; h = L.H - 38.f; }  // square: the card takes the screen
+  if (L.sq) { x = 8; y = 30; w = L.W - 16.f; h = L.H - 38.f; }  // square: the card takes the screen
   else { x = LIST_X; y = 30; w = LIST_W; h = L.H - 36.f; }
 }
 
@@ -1115,25 +1015,23 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
   if (skip) {  // the rest of the main page goes under the card
     float cx, cy, cw, ch;
     cardRect(cx, cy, cw, ch);
-    listTop = cy + ch + ROW_H * 0.5f + 8;
+    listTop = cy + ch + 23;
     c.clip((int)LIST_X - 6, (int)(cy + ch + 4), L.W, L.H);
   }
   float py = listTop + p.pill.v - skip * ROW_H - p.scroll.v;
   if (p.page == PG_FILES && nFiles == 0) {  // loading / empty / no Pi
     bool loading = listing && now - listAskedT < 15;  // the Pi may be reading a big USB stick
-    int x = (int)(LIST_X + (L.compact ? 4 : 8) + dx);
-    float k = ROW_H / 30.f;
+    int x = (int)(LIST_X + 8 + dx);
     if (loading) {
-      c.text(*FR, x, (int)(LIST_TOP + 35 * k), T(S_LOADING), LIGHT, alpha);
+      c.text(F_MD, x, (int)LIST_TOP + 35, T(S_LOADING), LIGHT, alpha);
       for (int i = 0; i < 3; i++)
-        c.fillCircle(x + 6 + i * 12, LIST_TOP + 55 * k, 3, PINK, alpha * (0.3f + 0.7f * (0.5f + 0.5f * sinf(now * 6 - i))));
+        c.fillCircle(x + 6 + i * 12, LIST_TOP + 55, 3, PINK, alpha * (0.3f + 0.7f * (0.5f + 0.5f * sinf(now * 6 - i))));
     } else {
-      c.text(*FR, x, (int)(LIST_TOP + 29 * k), T(S_NO_FILES1), LIGHT, alpha);
+      c.text(F_MD, x, (int)LIST_TOP + 29, T(S_NO_FILES1), LIGHT, alpha);
       char l1[64];
       fitText(F_SM, T(S_NO_FILES2), l1, sizeof l1, (int)LIST_W - 16);
-      c.text(F_SM, x, (int)(LIST_TOP + 51 * k), l1, DIM, alpha);
-      fitText(F_SM, HT(S_BACK_HINT), l1, sizeof l1, (int)LIST_W - 8);
-      c.text(F_SM, x, L.H - (L.compact ? 4 : 10), l1, FAINT, alpha * 0.7f);
+      c.text(F_SM, x, (int)LIST_TOP + 51, l1, DIM, alpha);
+      c.text(F_SM, x, L.H - 10, T(S_BACK_HINT), FAINT, alpha * 0.7f);
     }
     c.noClip();
     return;
@@ -1141,23 +1039,23 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
   if (listA > 0.01f) {
     float stretch = clampf(fabsf(p.pill.vel) * 0.012f, 0, 5);
     float pillA = skip ? clampf(p.pill.v / ROW_H, 0, 1) : 1;  // melts into the card on the way up
-    c.fillRoundRect(LIST_X + dx, py - PILL_H / 2.f - stretch / 2, LIST_W, PILL_H + stretch, PILL_H / 2.f, PINK, listA * pillA);
+    c.fillRoundRect(LIST_X + dx, py - 13 - stretch / 2, LIST_W, 26 + stretch, 13, PINK, listA * pillA);
     int n = pageCount(p);
     for (int i = skip; i < n; i++) {
       float ry = listTop + (i - skip) * ROW_H - p.scroll.v;
       if (ry < LIST_CLIP - 16 || ry > L.H + 16) continue;
       float k = clampf(1 - fabsf(ry - py) / ROW_H, 0, 1);
       ItemId it = itemAt(p, i);
-      int ty = (int)(ry + ROW_TY);
+      int ty = (int)(ry + 6);
       uint16_t vc = lerpColor(DIM, DARK, k);
       if (it == I_FILE) {
         char v[16], nm[64];
         fmt2(v, sizeof v, files[i].rpm);
         int vw = Canvas::textWidth(F_SM, v);
         int bw = files[i].usb ? Canvas::textWidth(F_SM, T(S_USB)) + 12 : 0;
-        fitText(*FR, files[i].name, nm, sizeof nm, (int)LIST_W - 2 * ROW_PAD - 8 - vw - bw);
-        c.text(*FR, (int)(LIST_X + ROW_PAD + dx + k * 2), ty, nm, lerpColor(hex(0xD2B6C3), DARK, k), listA);
-        int rx = (int)(LIST_X + LIST_W - ROW_PAD + dx);
+        fitText(F_MD, files[i].name, nm, sizeof nm, (int)LIST_W - 34 - vw - bw);
+        c.text(F_MD, (int)(LIST_X + 13 + dx + k * 2), ty, nm, lerpColor(hex(0xD2B6C3), DARK, k), listA);
+        int rx = (int)(LIST_X + LIST_W - 13 + dx);
         c.textRight(F_SM, rx, ty - 1, v, vc, listA);
         if (files[i].usb) {
           int bx = rx - vw - bw - 2;
@@ -1168,11 +1066,11 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
       }
       uint16_t base = it == I_PRINT ? PINK : (it == I_BACK ? DIM : hex(0xD2B6C3));
       if (it == I_POWEROFF || it == I_REBOOT) base = hex(0xFF9DB8);
-      c.text(*FR, (int)(LIST_X + ROW_PAD + dx + k * 2), ty, T(ITEM_NAME[it]), lerpColor(base, DARK, k), listA);
+      c.text(F_MD, (int)(LIST_X + 13 + dx + k * 2), ty, T(ITEM_NAME[it]), lerpColor(base, DARK, k), listA);
       char v[32];
       itemValue(it, v, sizeof v);
       if ((it == I_ROT || it == I_DARK || it == I_AXO_SHOW) && v[0] && strcmp(v, T(S_OFF))) vc = lerpColor(PINK, DARK, k);
-      c.textRight(F_SM, (int)(LIST_X + LIST_W - ROW_PAD + dx), ty - (L.compact ? 0 : 1), v, vc, listA);
+      c.textRight(F_SM, (int)(LIST_X + LIST_W - 13 + dx), ty - 1, v, vc, listA);
     }
     if (n > VISIBLE) {  // scroll indicator
       float span = L.H - LIST_CLIP - 8;
@@ -1184,118 +1082,19 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
   if (active) {
     float x, y, w, h;
     editTarget(x, y, w, h);
-    drawEditCard(c, LIST_X + dx, py - PILL_H / 2.f, LIST_W, x + dx, y, w, h, alpha);
+    drawEditCard(c, LIST_X + dx, py - 13, LIST_W, x + dx, y, w, h, alpha);
   }
   c.noClip();
-}
-
-// Round screen: the list as a wheel. The chosen row sits in the middle on the pill, the others turn
-// away above and below it (smaller and fainter, each as wide as the circle allows at its height),
-// and dots round the right edge show where you are in the list.
-static void drawWheel(Canvas& c, PageView& p, float dx, float alpha, bool active) {
-  float e = active ? clampf(edit.v, 0, 1.15f) : 0;
-  float listA = alpha * clampf(1 - e * 1.6f, 0, 1);
-  int skip = (p.page == PG_MAIN && S.home == HOME_CARD) ? 1 : 0;  // "Печать" is the card
-  float cy = LIST_TOP, mid = L.W / 2.f, rad = L.W / 2.f - 2;
-  c.clip(0, (int)LIST_CLIP, L.W, L.H);
-  if (skip) {  // the rest of the main page turns under the card
-    float x, y, w, h;
-    cardRect(x, y, w, h);
-    cy = y + h + 52;
-    c.clip(0, (int)(y + h + 4), L.W, L.H);
-  }
-  if (p.page == PG_FILES && nFiles == 0) {  // loading / empty / no Pi
-    bool loading = listing && now - listAskedT < 15;
-    char l1[64];
-    if (loading) {
-      c.textCentered(F_MD, (int)(mid + dx), (int)cy, T(S_LOADING), LIGHT, alpha);
-      for (int i = 0; i < 3; i++)
-        c.fillCircle(mid + dx + (i - 1) * 12, cy + 18, 3, PINK, alpha * (0.3f + 0.7f * (0.5f + 0.5f * sinf(now * 6 - i))));
-    } else {
-      c.textCentered(F_MD, (int)(mid + dx), (int)cy - 6, T(S_NO_FILES1), LIGHT, alpha);
-      fitText(F_SM, T(S_NO_FILES2), l1, sizeof l1, 170);
-      c.textCentered(F_SM, (int)(mid + dx), (int)cy + 16, l1, DIM, alpha);
-      fitText(F_SM, HT(S_BACK_HINT), l1, sizeof l1, 150);
-      c.textCentered(F_SM, (int)(mid + dx), (int)cy + 40, l1, FAINT, alpha * 0.7f);
-    }
-    c.noClip();
-    return;
-  }
-  float pos = p.pill.v / ROW_H;          // where the wheel stands, in rows
-  float at = skip ? fmx(pos, 1.f) : pos;  // the card is not on the wheel
-  int n = pageCount(p);
-  const float STEP = 0.42f, WR = ROW_H / STEP;  // angle per row, wheel radius (rows ROW_H apart in the middle)
-  if (listA > 0.01f) {
-    float stretch = clampf(fabsf(p.pill.vel) * 0.012f, 0, 5);
-    float pillA = skip ? clampf(pos, 0, 1) : 1;  // melts into the card on the way up
-    c.fillRoundRect(LIST_X + dx, cy - 15 - stretch / 2, LIST_W, 30 + stretch, 15, PINK, listA * pillA);
-    for (int i = skip; i < n; i++) {
-      float d = i - at, ang = d * STEP;
-      if (fabsf(ang) > 1.3f) continue;
-      float ry = cy + sinf(ang) * WR;
-      float k = clampf(1 - fabsf(i - pos), 0, 1);  // 1 = on the pill
-      float ra = listA * clampf(1.15f - fabsf(d) * 0.36f, 0, 1);
-      bool big = fabsf(d) < 0.5f;
-      const Font& f = big ? F_MD : F_SM;
-      int ty = (int)(ry + (big ? 6 : 5));
-      float yy = ry - L.H / 2.f;
-      float hc = fsqrt(fmx(rad * rad - yy * yy, 0));  // half the circle's width at this height
-      float xl = fmx(LIST_X + 14, mid - hc + 20) + dx, xr = fmn(LIST_X + LIST_W - 14, mid + hc - 20) + dx;
-      if (xr - xl < 40) continue;
-      ItemId it = itemAt(p, i);
-      uint16_t vc = lerpColor(DIM, DARK, k);
-      char v[32], nm[64];
-      if (it == I_FILE) {
-        fmt2(v, sizeof v, files[i].rpm);
-        int vw = Canvas::textWidth(F_SM, v);
-        fitText(f, files[i].name, nm, sizeof nm, (int)(xr - xl) - vw - 8);
-        c.text(f, (int)(xl + k * 2), ty, nm, lerpColor(hex(0xD2B6C3), DARK, k), ra);
-        c.textRight(F_SM, (int)xr, ty - 1, v, vc, ra);
-        continue;
-      }
-      uint16_t base = it == I_PRINT ? PINK : (it == I_BACK ? DIM : hex(0xD2B6C3));
-      if (it == I_POWEROFF || it == I_REBOOT) base = hex(0xFF9DB8);
-      itemValue(it, v, sizeof v);
-      int vw = v[0] ? Canvas::textWidth(F_SM, v) + 8 : 0;
-      if (!big && Canvas::textWidth(f, T(ITEM_NAME[it])) + vw > xr - xl) v[0] = 0, vw = 0;  // the name first
-      fitText(f, T(ITEM_NAME[it]), nm, sizeof nm, (int)(xr - xl) - vw);
-      c.text(f, (int)(xl + k * 2), ty, nm, lerpColor(base, DARK, k), ra);
-      if ((it == I_ROT || it == I_DARK || it == I_AXO_SHOW) && v[0] && strcmp(v, T(S_OFF))) vc = lerpColor(PINK, DARK, k);
-      c.textRight(F_SM, (int)xr, ty - 1, v, vc, ra);
-    }
-  }
-  c.noClip();
-  if (listA > 0.01f && n - skip > 1) {  // where you are: dots along the right edge, level with the pill
-    float a0 = asinf(clampf((cy - L.H / 2.f) / (rad - 8), -1, 1));
-    for (int i = skip; i < n; i++) {
-      float d = i - at;
-      if (fabsf(d) > 6) continue;
-      float a = a0 + d * 0.13f;
-      bool on = i == p.sel;
-      c.fillCircle(mid + cosf(a) * (rad - 8) + dx, L.H / 2.f + sinf(a) * (rad - 8), on ? 3.f : 1.8f, on ? PINK : FAINT,
-                   listA * clampf(1.4f - fabsf(d) * 0.2f, 0, 1));
-    }
-  }
-  if (active) {
-    float x, y, w, h;
-    editTarget(x, y, w, h);
-    drawEditCard(c, LIST_X + dx, cy - PILL_H / 2.f, LIST_W, x + dx, y, w, h, alpha);
-  }
-}
-
-static void drawPage(Canvas& c, PageView& p, float dx, float alpha, bool active) {
-  if (L.round) drawWheel(c, p, dx, alpha, active);
-  else drawList(c, p, dx, alpha, active);
 }
 
 static void drawMenu(Canvas& c, float dx, float ca) {
   if (nav.v < 0.999f && navDir != 0) {
     float k = easeOut(nav.v);
     float Wd = L.W * 0.62f;
-    drawPage(c, oldPv, dx - navDir * k * Wd, ca * (1 - k), false);
-    drawPage(c, pv, dx + navDir * (1 - k) * Wd, ca * k, true);
+    drawList(c, oldPv, dx - navDir * k * Wd, ca * (1 - k), false);
+    drawList(c, pv, dx + navDir * (1 - k) * Wd, ca * k, true);
   } else {
-    drawPage(c, pv, dx, ca, true);
+    drawList(c, pv, dx, ca, true);
   }
 }
 
@@ -1308,168 +1107,84 @@ static void drawSetup(Canvas& c, float dx, float ca, float dt) {
   float e = clampf(edit.v, 0, 1.15f);
   float la = ca * clampf(1 - e * 1.6f, 0, 1);
   FileEntry& f = files[suFile];
-  // where things go: wide = rows on the left, the button on the right; square = rows, the button
-  // under them; compact = the same, smaller; round = everything centred inside the circle
-  float nameY = 46, planY = 62, rowY0, rowH, rowX = 8, rowW, pillH = 24, bx, by, bw, bh;
-  int wy, pad = 12;
-  const Font* fName = &F_MD;
-  const Font* fVal = &F_MD;
-  if (L.round) {
-    nameY = 62; planY = 80; rowY0 = 104; rowH = 24; rowX = 30; rowW = L.W - 60.f;
-    bx = 52; by = 166; bw = L.W - 104.f; bh = 40; wy = (int)planY;
-  } else if (L.compact) {
-    fName = fVal = &F_SM;
-    nameY = 31; planY = 45; rowY0 = 59; rowH = 17; rowX = 4; rowW = L.W - 8.f; pillH = 16; pad = 6;
-    bx = 4; by = 106; bw = L.W - 8.f; bh = 19; wy = (int)planY;
-  } else if (L.sq) {
-    rowY0 = 82; rowH = 24; rowW = L.W - 16.f;
-    bx = 8; by = 162; bw = L.W - 16.f; bh = L.H - 170.f; wy = 153;
-  } else {
-    rowY0 = 84; rowH = 26; rowW = L.W - 124.f;
-    bx = L.W - 106.f; by = 74; bw = 98; bh = 74; wy = L.H - 8;
-  }
-  bx += dx;
-  bool ctr = L.round;
-  int tx = (int)((L.compact ? 6 : 12) + dx), tw = ctr ? 170 : L.W - (L.compact ? 10 : 24);
-  // a warning if something will make the dose wrong
-  float dev = f.planRevs > 0 ? 100.f * (suTurns / (f.planRevs * (1 + suFactor / 100.f)) - 1.f) : 0;
-  float tol = f.tol > 0 ? f.tol : 5.f;
-  char warn[64] = "", nm[64], b[64], b2[64];
-  if (!f.cadOk) snprintf(warn, sizeof warn, "%s", T(S_W_CADENCE));
-  else if (f.planRevs > 0 && fabsf(dev) > tol / 2)
-    snprintf(warn, sizeof warn, "%s %+.0f%% · %s ±%.0f%%", T(S_W_DOSE), (double)dev, T(S_PLAN), (double)tol);
-  bool warnOnTop = (L.round || L.compact) && warn[0];  // no room for a line of its own there
-  fitText(*fName, f.name, nm, sizeof nm, tw);
-  if (ctr) c.textCentered(*fName, (int)(L.W / 2 + dx), (int)nameY, nm, LIGHT, ca);
-  else c.text(*fName, tx, (int)nameY, nm, LIGHT, ca);
-  uint16_t planC = DIM;
-  if (warnOnTop) { snprintf(b, sizeof b, "%s", warn); planC = PINK; }
-  else if (f.planRevs > 0) {
+  char nm[64], b[64], b2[64];
+  fitText(F_MD, f.name, nm, sizeof nm, L.W - 24);
+  c.text(F_MD, (int)(12 + dx), 46, nm, LIGHT, ca);
+  if (f.planRevs > 0) {
     if (f.tol > 0) snprintf(b, sizeof b, "%s · %s %.2f %s · ±%.0f%%", f.usb ? T(S_USB) : "SpinPi", T(S_PLAN), (double)f.planRevs, T(S_TURNS_UNIT), (double)f.tol);
     else snprintf(b, sizeof b, "%s · %s %.2f %s", f.usb ? T(S_USB) : "SpinPi", T(S_PLAN), (double)f.planRevs, T(S_TURNS_UNIT));
+    fitText(F_SM, b, b2, sizeof b2, L.W - 24);
+    c.text(F_SM, (int)(12 + dx), 62, b2, DIM, ca);
   } else {
-    snprintf(b, sizeof b, "%s", T(S_NO_PLAN));
-    planC = PINK;
+    fitText(F_SM, T(S_NO_PLAN), b2, sizeof b2, L.W - 24);
+    c.text(F_SM, (int)(12 + dx), 62, b2, PINK, ca);
   }
-  fitText(F_SM, b, b2, sizeof b2, ctr ? 180 : tw);
-  if (ctr) c.textCentered(F_SM, (int)(L.W / 2 + dx), (int)planY, b2, planC, ca);
-  else c.text(F_SM, tx, (int)planY, b2, planC, ca);
-  // rows
+  // rows: beside the button (wide) or above it (square)
   const ItemId rows[3] = {I_SU_TURNS, I_SU_FACTOR, I_SU_DELAY};
+  float rowY0 = L.sq ? 82 : 84, rowH = L.sq ? 24 : 26, rowW = L.sq ? L.W - 16.f : L.W - 124.f;
   float pillY = rowY0 + suPill.v * rowH;
   float rowsA = la * (1 - clampf(suPill.v - 2, 0, 1));
-  if (suPill.v < 2.99f) c.fillRoundRect(rowX + dx, pillY - pillH / 2, rowW, pillH, pillH / 2, PINK, rowsA);
+  if (suPill.v < 2.99f) c.fillRoundRect(8 + dx, pillY - 12, rowW, 24, 12, PINK, rowsA);
   for (int i = 0; i < 3; i++) {
     float ry = rowY0 + i * rowH;
     float k = clampf(1 - fabsf(ry - pillY) / rowH, 0, 1) * (suPill.v < 2.99f ? 1 : 0);
-    c.text(F_SM, (int)(rowX + pad + dx + k * 2), (int)ry + 5, T(ITEM_NAME[rows[i]]), lerpColor(hex(0xD2B6C3), DARK, k), la);
+    c.text(F_SM, (int)(20 + dx + k * 2), (int)ry + 5, T(ITEM_NAME[rows[i]]), lerpColor(hex(0xD2B6C3), DARK, k), la);
     char v[24];
     if (i == 0) { fmtTime(v, sizeof v, (int)lroundf(suTurns * f.revS)); snprintf(b, sizeof b, "%d · %s", suTurns, v); }
     else if (i == 1) snprintf(b, sizeof b, "%+.0f%%", (double)suFactor);
     else snprintf(b, sizeof b, "%.0f %s", (double)suDelay, T(S_SEC));
-    c.textRight(*fVal, (int)(rowX + rowW - (L.compact ? 6 : 10) + dx), (int)ry + (L.compact ? 5 : 6), b, lerpColor(LIGHT, DARK, k), la);
+    c.textRight(F_MD, (int)(8 + rowW - 10 + dx), (int)ry + 6, b, lerpColor(LIGHT, DARK, k), la);
   }
   // the button
   float s = suBtn.v;
   float pulse = s * (0.5f + 0.5f * sinf(now * 4));
-  float grow = (L.compact ? 1.5f : 3) * s, br = L.compact ? 10 : 18;
-  if (s > 0.02f) c.glow(bx + bw / 2, by + bh / 2, L.compact ? 40 : 70, HOT, 0.28f * s * la + 0.08f * pulse * la);
-  c.fillRoundRect(bx - grow, by - grow, bw + grow * 2, bh + grow * 2, br, lerpColor(hex(0x8A4560), PINK, 0.35f + 0.65f * s), la);
-  if (s > 0.02f) c.strokeRoundRect(bx - grow - 3, by - grow - 3, bw + grow * 2 + 6, bh + grow * 2 + 6, br + 3, 1.5f, LIGHT, s * la * (0.5f + 0.5f * pulse));
-  const Font& bf = L.compact ? F_SM : (L.sq ? F_LG : F_MD);
-  c.textCentered(bf, (int)(bx + bw / 2), (int)(by + bh / 2 + (L.compact ? 5 : (L.sq ? 8 : 5))), T(S_PRINT_BTN), DARK, la);
+  float bx, by, bw, bh;
+  if (L.sq) { bx = 8 + dx; by = 162; bw = L.W - 16.f; bh = L.H - 170.f; }
+  else { bx = L.W - 106 + dx; by = 74; bw = 98; bh = 74; }
+  float grow = 3 * s;
+  if (s > 0.02f) c.glow(bx + bw / 2, by + bh / 2, 70, HOT, 0.28f * s * la + 0.08f * pulse * la);
+  c.fillRoundRect(bx - grow, by - grow, bw + grow * 2, bh + grow * 2, 18, lerpColor(hex(0x8A4560), PINK, 0.35f + 0.65f * s), la);
+  if (s > 0.02f) c.strokeRoundRect(bx - grow - 3, by - grow - 3, bw + grow * 2 + 6, bh + grow * 2 + 6, 21, 1.5f, LIGHT, s * la * (0.5f + 0.5f * pulse));
+  c.textCentered(L.sq ? F_LG : F_MD, (int)(bx + bw / 2), (int)(by + bh / 2 + (L.sq ? 8 : 5)), T(S_PRINT_BTN), DARK, la);
   if (!L.sq) c.textCentered(F_SM, (int)(bx + bw / 2), (int)(by + bh / 2 + 24), "OK", DARK, la * 0.55f * s);
-  // the warning on a line of its own, else the hint (wide)
-  if (!warnOnTop && warn[0]) { fitText(F_SM, warn, b2, sizeof b2, L.W - 24); c.text(F_SM, tx, wy, b2, PINK, la); }
-  else if (!L.sq) c.text(F_SM, tx, wy, HT(S_SETUP_HINT), FAINT, la * 0.8f);
+  // a warning if something will make the dose wrong, else the hint
+  float dev = f.planRevs > 0 ? 100.f * (suTurns / (f.planRevs * (1 + suFactor / 100.f)) - 1.f) : 0;
+  float tol = f.tol > 0 ? f.tol : 5.f;
+  int wy = L.sq ? 153 : L.H - 8;
+  int ww = L.W - 24;
+  if (!f.cadOk) { fitText(F_SM, T(S_W_CADENCE), b2, sizeof b2, ww); c.text(F_SM, (int)(12 + dx), wy, b2, PINK, la); }
+  else if (f.planRevs > 0 && fabsf(dev) > tol / 2) {
+    snprintf(b, sizeof b, "%s %+.0f%% · %s ±%.0f%%", T(S_W_DOSE), (double)dev, T(S_PLAN), (double)tol);
+    c.text(F_SM, (int)(12 + dx), wy, b, PINK, la);
+  } else if (!L.sq) {
+    c.text(F_SM, (int)(12 + dx), wy, T(S_SETUP_HINT), FAINT, la * 0.8f);
+  }
   float x, y, w, h;
   editTarget(x, y, w, h);
   if (!L.sq) { x = 8; w = rowW; }
-  drawEditCard(c, rowX + dx, pillY - PILL_H / 2.f, rowW, x + dx, y, w, h, ca);
-}
-
-// Round screen: the progress is a ring round the edge of the glass, the vial's angle a dot going
-// round just inside it, the numbers in the middle.
-static void drawPrintRound(Canvas& c, float dx, float ca) {
-  float cx = L.W / 2.f, cy = L.H / 2.f, R = L.W / 2.f - 7;
-  float p = clampf(prog.v, 0, 1);
-  c.ring(cx, cy, R, 6, PANEL, ca);
-  if (infinite) {
-    float a = now * 1.6f;
-    c.arc(cx, cy, R, 6, a, a + 1.2f, PINK, ca);
-  } else if (p > 0.002f) {
-    c.arc(cx, cy, R, 6, -1.5708f, -1.5708f + 6.2832f * p, PINK, ca);
-  }
-  float ang = angleNow() * 0.0174533f - 1.5708f, r2 = R - 12;
-  c.ring(cx, cy, r2, 1.2f, LINE, ca);
-  c.glow(cx + cosf(ang) * r2, cy + sinf(ang) * r2, 9, HOT, 0.7f * ca);
-  c.fillCircle(cx + cosf(ang) * r2, cy + sinf(ang) * r2, 3, LIGHT, ca);
-  char b[64], b2[64], t[24];
-  int mx = (int)(cx + dx);
-  if (infinite) snprintf(b, sizeof b, "∞");
-  else snprintf(b, sizeof b, "%d%%", (int)(p * 100 + 0.5f));
-  c.textCentered(F_MD, mx, 56, b, LIGHT, ca);
-  fitText(F_SM, fileName[0] ? fileName : T(S_PRINTING), b2, sizeof b2, 160);
-  c.textCentered(F_SM, mx, 78, b2, DIM, ca);
-  bool waiting = waitKind[0] != 0;
-  if (waiting) {  // light still off: spin-up, warm-up or dark pause
-    const char* what = !strcmp(waitKind, "warm") ? T(S_WAIT_WARM) : (!strcmp(waitKind, "dark") ? T(S_WAIT_DARK) : T(S_WAIT_SPIN));
-    fmtTime(t, sizeof t, waitSec);
-    c.textCentered(F_XL, mx, 134, t, LIGHT, ca * (0.6f + 0.4f * sinf(now * 3)));
-    c.textCentered(F_SM, mx, 154, what, PINK, ca);
-  } else {
-    fmtTime(t, sizeof t, secLeft);
-    c.textCentered(F_XL, mx, 134, t, PINK, ca);
-    if (syncMs >= 0) snprintf(b, sizeof b, "%s · %s ±%.0f ms", infinite ? T(S_ELAPSED) : T(S_LEFT), T(S_SYNC), (double)syncMs);
-    else snprintf(b, sizeof b, "%s", infinite ? T(S_ELAPSED) : T(S_LEFT));
-    fitText(F_SM, b, b2, sizeof b2, 180);
-    c.textCentered(F_SM, mx, 154, b2, DIM, ca);
-  }
-  char rr[16];
-  fmt2(rr, sizeof rr, H.motorRpm());
-  if (turnsTotal > 0 && !waiting) {
-    int rev = (int)(p * turnsTotal) + 1;
-    if (rev > turnsTotal) rev = turnsTotal;
-    snprintf(b, sizeof b, "%s · %s %d %s %d", rr, T(S_REV), rev, T(S_OF), turnsTotal);
-  } else {
-    snprintf(b, sizeof b, "%s %s", rr, T(S_RPM));
-  }
-  fitText(F_SM, b, b2, sizeof b2, 176);
-  c.textCentered(F_SM, mx, 178, b2, LIGHT, ca);
-  if (drops > 0 && !stopping) {
-    snprintf(b, sizeof b, "%s: %d", T(S_DROPS), drops);
-    c.textCentered(F_SM, mx, 200, b, PINK, ca);
-  } else {
-    const char* hint = stopping ? T(S_STOPPING) : (S.dark ? T(S_DARKENED) : HT(S_HOLD_STOP));
-    fitText(F_SM, hint, b2, sizeof b2, 140);
-    c.textCentered(F_SM, mx, 200, b2, stopping ? PINK : FAINT, ca);
-  }
+  drawEditCard(c, 8 + dx, pillY - 12, rowW, x + dx, y, w, h, ca);
 }
 
 static void drawPrint(Canvas& c, float dx, float ca) {
-  if (L.round) { drawPrintRound(c, dx, ca); return; }
-  float cx = L.compact ? 30 : L.artCx, cy = L.compact ? 62 : (L.sq ? L.artCy : 100), R = L.compact ? 26 : (L.sq ? 44 : 52);
+  float cx = L.artCx, cy = L.sq ? L.artCy : 100, R = L.sq ? 44 : 52;
   float p = clampf(prog.v, 0, 1);
-  float th = L.compact ? 3 : 4;
-  c.ring(cx, cy, R, th, PANEL, ca);
+  c.ring(cx, cy, R, 4, PANEL, ca);
   if (infinite) {
     float a = now * 1.6f;
-    c.arc(cx, cy, R, th, a, a + 1.2f, PINK, ca);
+    c.arc(cx, cy, R, 4, a, a + 1.2f, PINK, ca);
   } else if (p > 0.002f) {
-    c.arc(cx, cy, R, th, -1.5708f, -1.5708f + 6.2832f * p, PINK, ca);
+    c.arc(cx, cy, R, 4, -1.5708f, -1.5708f + 6.2832f * p, PINK, ca);
   }
-  drawDial(c, cx, cy, R - (L.compact ? 8 : 12), ca, false);
+  drawDial(c, cx, cy, R - 12, ca, false);
   char b[48];
   if (infinite) snprintf(b, sizeof b, "∞");
   else snprintf(b, sizeof b, "%d%%", (int)(p * 100 + 0.5f));
-  c.textCentered(L.compact ? F_SM : F_MD, (int)cx, (int)cy + (L.compact ? 5 : 6), b, LIGHT, ca);
+  c.textCentered(F_MD, (int)cx, (int)cy + 6, b, LIGHT, ca);
 
-  // text column: right of the dial (wide, compact) or under it (square)
-  int x = (int)((L.compact ? 64 : (L.sq ? 12 : 132)) + dx), r = L.W - (L.compact ? 4 : 8);
-  int yName = L.compact ? 31 : (L.sq ? 134 : 46), yBig = L.compact ? 61 : (L.sq ? 178 : 92),
-      yLab = L.compact ? 77 : (L.sq ? 196 : 110), yRpm = L.compact ? 105 : (L.sq ? 216 : 134), yHint = L.H - (L.compact ? 5 : 8);
-  int xLow = L.compact ? (int)(5 + dx) : x;  // the two last lines: under the dial on 160x128
-  const Font& big = L.compact ? F_LG : F_XL;
+  // text column: right of the dial (wide) or under it (square)
+  int x = (int)((L.sq ? 12 : 132) + dx), r = L.W - 8;
+  int yName = L.sq ? 134 : 46, yBig = L.sq ? 178 : 92, yLab = L.sq ? 196 : 110, yRpm = L.sq ? 216 : 134,
+      yHint = L.H - 8;
   char nm[64];
   fitText(F_SM, fileName[0] ? fileName : T(S_PRINTING), nm, sizeof nm, r - x);
   c.text(F_SM, x, yName, nm, DIM, ca);
@@ -1478,29 +1193,22 @@ static void drawPrint(Canvas& c, float dx, float ca) {
   if (waiting) {  // light still off: spin-up, warm-up or dark pause
     const char* what = !strcmp(waitKind, "warm") ? T(S_WAIT_WARM) : (!strcmp(waitKind, "dark") ? T(S_WAIT_DARK) : T(S_WAIT_SPIN));
     fmtTime(t, sizeof t, waitSec);
-    c.text(big, x - 2, yBig, t, LIGHT, ca * (0.6f + 0.4f * sinf(now * 3)));
-    fitText(F_SM, what, nm, sizeof nm, r - x);
-    c.text(F_SM, x, yLab, nm, PINK, ca);
+    c.text(F_XL, x - 2, yBig, t, LIGHT, ca * (0.6f + 0.4f * sinf(now * 3)));
+    c.text(F_SM, x, yLab, what, PINK, ca);
   } else {
     fmtTime(t, sizeof t, secLeft);
-    c.text(big, x - 2, yBig, t, PINK, ca);
+    c.text(F_XL, x - 2, yBig, t, PINK, ca);
     c.text(F_SM, x, yLab, infinite ? T(S_ELAPSED) : T(S_LEFT), DIM, ca);
   }
-  if (syncMs >= 0 && !waiting && !L.compact) {
+  if (syncMs >= 0 && !waiting) {
     snprintf(b, sizeof b, "%s ±%.0f ms", T(S_SYNC), (double)syncMs);
     c.textRight(F_SM, r, yLab, b, syncMs < 20 ? PINK : DIM, ca);
   }
   char rr[16];
   fmt2(rr, sizeof rr, H.motorRpm());
-  bool oneLine = L.compact && turnsTotal > 0 && !waiting;  // 160 px: "4.00 · оборот 3 из 6"
-  if (oneLine) {
-    int rev = (int)(p * turnsTotal) + 1;
-    snprintf(b, sizeof b, "%s · %s %d %s %d", rr, T(S_REV), rev > turnsTotal ? turnsTotal : rev, T(S_OF), turnsTotal);
-  } else {
-    snprintf(b, sizeof b, "%s %s", rr, T(S_RPM));
-  }
-  c.text(F_SM, xLow, yRpm, b, LIGHT, ca);
-  if (turnsTotal > 0 && !waiting && !oneLine) {
+  snprintf(b, sizeof b, "%s %s", rr, T(S_RPM));
+  c.text(F_SM, x, yRpm, b, LIGHT, ca);
+  if (turnsTotal > 0 && !waiting) {
     int rev = (int)(p * turnsTotal) + 1;
     if (rev > turnsTotal) rev = turnsTotal;
     snprintf(b, sizeof b, "%s %d %s %d", T(S_REV), rev, T(S_OF), turnsTotal);
@@ -1508,11 +1216,10 @@ static void drawPrint(Canvas& c, float dx, float ca) {
   }
   if (drops > 0 && !stopping) {
     snprintf(b, sizeof b, "%s: %d", T(S_DROPS), drops);
-    c.text(F_SM, xLow, yHint, b, PINK, ca);
+    c.text(F_SM, x, yHint, b, PINK, ca);
   } else {
-    const char* hint = stopping ? T(S_STOPPING) : (S.dark ? T(S_DARKENED) : HT(S_HOLD_STOP));
-    fitText(F_SM, hint, nm, sizeof nm, r - xLow);
-    c.text(F_SM, xLow, yHint, nm, stopping ? PINK : FAINT, ca);
+    const char* hint = stopping ? T(S_STOPPING) : (S.dark ? T(S_DARKENED) : T(S_HOLD_STOP));
+    c.text(F_SM, x, yHint, hint, stopping ? PINK : FAINT, ca);
   }
 }
 
@@ -1525,22 +1232,6 @@ static void drawDone(Canvas& c, float dx, float ca, float dt) {
     if (p.y < L.H + 5) c.fillCircle(p.x, p.y, p.r, p.c, 0.9f);
   }
   static const Str OPT[3] = {S_R_UNDER, S_R_OK, S_R_OVER};
-  if (L.round || L.compact) {  // too narrow for three buttons: one, up / down changes the answer
-    int mx = (int)(L.W / 2 + dx);
-    float ty = L.round ? 134 : 72, hy = L.round ? 154 : 88, by = L.round ? 166 : 95, ph = L.round ? 30 : 22;
-    c.textCentered(*FBIG, mx, (int)ty, T(S_DONE), PINK, ca);
-    char hb[48];
-    fitText(F_SM, T(S_HOW), hb, sizeof hb, L.W - 16);
-    c.textCentered(F_SM, mx, (int)hy, hb, LIGHT, ca * 0.85f);
-    float pw = L.round ? 150 : L.W - 36.f, bx = mx - pw / 2;
-    c.fillRoundRect(bx, by, pw, ph, ph / 2, PINK, ca);
-    c.textCentered(F_SM, mx, (int)(by + ph / 2 + 5), T(OPT[doneSel]), DARK, ca);
-    if (doneSel > 0) c.text(F_SM, (int)bx + 8, (int)(by + ph / 2 + 5), "←", DARK, ca * 0.5f);
-    if (doneSel < 2) c.textRight(F_SM, (int)(bx + pw) - 8, (int)(by + ph / 2 + 5), "→", DARK, ca * 0.5f);
-    for (int i = 0; i < 3; i++)
-      c.fillCircle(mx + (i - 1) * 12, by + ph + (L.round ? 12 : 6), i == doneSel ? 2.6f : 1.8f, i == doneSel ? PINK : FAINT, ca);
-    return;
-  }
   if (L.sq) {
     c.textCentered(F_LG, L.W / 2, 144, T(S_DONE), PINK, ca);
     c.textCentered(F_SM, L.W / 2, 166, T(S_HOW), LIGHT, ca * 0.85f);
@@ -1559,67 +1250,42 @@ static void drawDone(Canvas& c, float dx, float ca, float dt) {
 }
 
 static void drawAbout(Canvas& c, float dx, float ca) {
-  int x, r, y0, step;
-  if (L.round) { x = 36; r = L.W - 36; y0 = 66; step = 25; }
-  else if (L.compact) { x = 5; r = L.W - 5; y0 = 34; step = 18; }
-  else if (L.sq) { x = 12; r = L.W - 8; y0 = 128; step = 20; }
-  else { x = (int)LIST_X + 6; r = L.W - 8; y0 = 48; step = L.H < 200 ? 21 : 30; }
-  x += (int)dx;
-  struct { Str k; char v[40]; } rows[5];
-  rows[0].k = S_VERSION; snprintf(rows[0].v, 40, "%s", FW_VERSION);
-  rows[1].k = S_SCREEN;
-  if (panelName[0]) snprintf(rows[1].v, 40, "%s %d×%d", panelName, L.W, L.H);
-  else snprintf(rows[1].v, 40, "%d×%d", L.W, L.H);
-  rows[2].k = S_PI; snprintf(rows[2].v, 40, "%s", piOk() ? T(S_CONNECTED) : T(S_NOT_CONNECTED));
-  rows[3].k = S_MOTOR; snprintf(rows[3].v, 40, "%d × 1/%d", S.stepsRev, S.micro);
-  rows[4].k = S_UPTIME; fmtTime(rows[4].v, 40, (int)now);
-  for (int i = 0; i < 5; i++) {
+  int x = (int)((L.sq ? 12 : LIST_X + 6) + dx), r = L.W - 8;
+  int y0 = L.sq ? 136 : 50, step = L.sq ? 22 : 26;
+  struct { Str k; char v[32]; } rows[4];
+  rows[0].k = S_VERSION; snprintf(rows[0].v, 32, "%s", FW_VERSION);
+  rows[1].k = S_PI; snprintf(rows[1].v, 32, "%s", piOk() ? T(S_CONNECTED) : T(S_NOT_CONNECTED));
+  rows[2].k = S_MOTOR; snprintf(rows[2].v, 32, "%d × 1/%d", S.stepsRev, S.micro);
+  rows[3].k = S_UPTIME; fmtTime(rows[3].v, 32, (int)now);
+  for (int i = 0; i < 4; i++) {
     int y = y0 + i * step;
     float a = ca * easeOut((now - enterT - i * 0.05f) / 0.3f);
-    const char* k = T(rows[i].k);
-    c.text(F_SM, x, y, k, DIM, a);
-    int room = r - x - Canvas::textWidth(F_SM, k) - 8;
-    const Font& f = !L.compact && Canvas::textWidth(F_MD, rows[i].v) <= room ? F_MD : F_SM;
-    char v[40];
-    fitText(f, rows[i].v, v, sizeof v, room);
-    c.textRight(f, r, y + 1, v, i == 2 && piOk() ? PINK : LIGHT, a);
-    c.fillRect(x, y + (L.compact ? 5 : 8), r - x, 1, LINE, a);
+    c.text(F_SM, x, y, T(rows[i].k), DIM, a);
+    c.textRight(F_MD, r, y + 1, rows[i].v, i == 1 && piOk() ? PINK : LIGHT, a);
+    c.fillRect(x, y + 8, r - x, 1, LINE, a);
   }
   // load: so people porting to other boards can see what it costs
   char b[48];
   snprintf(b, sizeof b, "%d fps · %.1f ms · %.1f KB", (int)(fps + 0.5f), (double)renderMs, (double)pushKB);
-  if (L.round) c.textCentered(F_SM, L.W / 2, y0 + 5 * step + 8, b, FAINT, ca);
-  else c.textRight(F_SM, r, L.H - (L.compact ? 4 : 8), b, FAINT, ca);
-  if (!L.sq && L.H >= 200) c.text(F_SM, x, L.H - 24, HT(S_BACK_HINT), DIM, ca * 0.7f);
+  c.textRight(F_SM, r, L.H - 8, b, FAINT, ca);
+  if (!L.sq) c.text(F_SM, x, L.H - 24, T(S_BACK_HINT), DIM, ca * 0.7f);
 }
 
 static void drawConnect(Canvas& c, float dx, float ca) {
-  char b[64], fb[64];
+  int x = (int)((L.sq ? 12 : LIST_X + 6) + dx);
   if (!qrOk) {
-    if (L.round) {
-      int mx = (int)(L.W / 2 + dx);
-      c.textCentered(F_MD, mx, L.H / 2 - 8, T(S_NOPI1), LIGHT, ca);
-      fitText(F_SM, T(S_NOPI2), fb, sizeof fb, 180);
-      c.textCentered(F_SM, mx, L.H / 2 + 14, fb, DIM, ca);
-      fitText(F_SM, HT(S_BACK_HINT), fb, sizeof fb, 150);
-      c.textCentered(F_SM, mx, L.H / 2 + 40, fb, FAINT, ca * 0.7f);
-      return;
-    }
-    int x = (int)((L.compact ? 6 : (L.sq ? 12 : LIST_X + 6)) + dx), y = L.compact ? 50 : (L.sq ? 140 : 74);
-    c.text(L.compact ? F_SM : F_MD, x, y, T(S_NOPI1), LIGHT, ca);
-    fitText(F_SM, T(S_NOPI2), fb, sizeof fb, L.W - x - 4);
-    c.text(F_SM, x, y + 22, fb, DIM, ca);
-    fitText(F_SM, HT(S_BACK_HINT), fb, sizeof fb, L.W - x - 4);
-    c.text(F_SM, x, L.H - (L.compact ? 4 : 8), fb, FAINT, ca * 0.7f);
+    int y = L.sq ? 140 : 74;
+    c.text(F_MD, x, y, T(S_NOPI1), LIGHT, ca);
+    c.text(F_SM, x, y + 22, T(S_NOPI2), DIM, ca);
+    c.text(F_SM, x, L.H - 8, T(S_BACK_HINT), FAINT, ca * 0.7f);
     return;
   }
   int n = qrcodegen_getSize(qr);
-  int box = L.round ? 124 : (L.compact ? 90 : (L.sq ? 128 : 104));
+  int box = L.sq ? 128 : 104;
   int sc = box / (n + 4);
   if (sc < 1) sc = 1;
   int sz = (n + 4) * sc;
-  float qcx = L.sq ? L.W / 2.f : 62;
-  float qcy = L.round ? 100 : (L.compact ? 20 + sz / 2.f : (L.sq ? 30 + sz / 2.f + 4 : 100));
+  float qcx = L.sq ? L.W / 2.f : 62, qcy = L.sq ? 30 + sz / 2.f + 4 : 100;
   float qx = qcx - sz / 2.f, qy = qcy - sz / 2.f;
   float pop = easeOut((now - enterT) / 0.45f);
   c.fillRoundRect(qx - 4, qy - 4, sz + 8, sz + 8, 10, WHITE, ca * pop);
@@ -1627,36 +1293,31 @@ static void drawConnect(Canvas& c, float dx, float ca) {
     for (int xx = 0; xx < n; xx++)
       if (qrcodegen_getModule(qr, xx, yy))
         c.fillRect((int)qx + (xx + 2) * sc, (int)qy + (yy + 2) * sc, sc, sc, DARK, ca * pop);
-  if (L.sq) {  // the address under the code (on 160x128 just the address)
-    int y = (int)(qy + sz + (L.compact ? 16 : 24)), tw = L.round ? 170 : L.W - 8;
-    fitText(F_SM, url, fb, sizeof fb, tw);
-    c.textCentered(F_SM, L.W / 2, y, fb, PINK, ca);
-    if (L.compact) return;
-    int lw = L.round ? 140 : tw;
-    if (host[0]) { snprintf(b, sizeof b, "%s %s", T(S_OR), host); fitText(F_SM, b, fb, sizeof fb, lw); c.textCentered(F_SM, L.W / 2, y + 18, fb, DIM, ca); }
-    if (wifi[0]) { snprintf(b, sizeof b, "%s: %s", T(S_WIFI), wifi); fitText(F_SM, b, fb, sizeof fb, lw - 20); c.textCentered(F_SM, L.W / 2, y + 36, fb, DIM, ca); }
+  char b[64];
+  if (L.sq) {
+    int y = (int)(qy + sz + 24);
+    c.textCentered(F_SM, L.W / 2, y, url, PINK, ca);
+    if (host[0]) { snprintf(b, sizeof b, "%s %s", T(S_OR), host); c.textCentered(F_SM, L.W / 2, y + 18, b, DIM, ca); }
+    if (wifi[0]) { snprintf(b, sizeof b, "%s: %s", T(S_WIFI), wifi); c.textCentered(F_SM, L.W / 2, y + 36, b, DIM, ca); }
     return;
   }
-  int x = (int)(LIST_X + 6 + dx);
   c.text(F_MD, x, 52, T(S_OPEN_PHONE), LIGHT, ca);
   c.text(F_SM, x, 76, url, PINK, ca);
   if (host[0]) { snprintf(b, sizeof b, "%s %s", T(S_OR), host); c.text(F_SM, x, 96, b, DIM, ca); }
   if (wifi[0]) { snprintf(b, sizeof b, "%s: %s", T(S_WIFI), wifi); c.text(F_SM, x, 122, b, DIM, ca); }
-  c.text(F_SM, x, L.H - 8, HT(S_BACK_HINT), FAINT, ca * 0.7f);
+  c.text(F_SM, x, L.H - 8, T(S_BACK_HINT), FAINT, ca * 0.7f);
 }
 
 static void drawConfirm(Canvas& c) {
   float a = clampf(confirm.v, 0, 1);
   if (a < 0.01f) return;
   c.fillRect(0, 0, L.W, L.H, BG, 0.75f * a);
-  float w = fminf(L.round ? 184.f : 230.f, L.W - 16.f), h = 92, x = L.W / 2.f - w / 2, y = L.H / 2.f - h / 2 + (1 - a) * 14;
+  float w = fminf(230.f, L.W - 16.f), h = 92, x = L.W / 2.f - w / 2, y = L.H / 2.f - h / 2 + (1 - a) * 14;
   c.fillRoundRect(x, y, w, h, 16, PANEL, a);
   c.strokeRoundRect(x, y, w, h, 16, 1.2f, HOT, a);
   c.textCentered(F_SM, L.W / 2, (int)y + 26, T(ITEM_NAME[confirmItem]), DIM, a);
   c.textCentered(F_LG, L.W / 2, (int)y + 56, T(S_SURE), PINK, a);
-  char hb[48];
-  fitText(F_SM, HT(S_SURE_HINT), hb, sizeof hb, (int)w - 16);
-  c.textCentered(F_SM, L.W / 2, (int)y + 78, hb, LIGHT, a * 0.7f);
+  c.textCentered(F_SM, L.W / 2, (int)y + 78, T(S_SURE_HINT), LIGHT, a * 0.7f);
 }
 
 // ================================================================ Spinny's behaviour
@@ -1673,16 +1334,15 @@ static void think(float dt, bool visible, float s) {
   g.maxV = 42 * s;
   float headX, headY;
   spinnyHeadXY(B.body, headX, headY);
-  float homeY = L.round || L.compact ? L.artCy : (L.sq ? 100 : 84);
-  if (!B.body.init) spinnyPlace(B.body, -20, homeY, s, true);  // enters from the left
+  if (!B.body.init) spinnyPlace(B.body, -20, L.sq ? 100 : 84, s, true);  // enters from the left
 
   if (screen == SC_BOOT) {
     g.tx = L.sq ? L.W * 0.66f : L.artX1 - 24;  // across the logo, ends near his corner
-    g.ty = homeY;
+    g.ty = L.sq ? 100 : 84;
     g.maxV = 70 * s;
   } else if (screen == SC_DONE) {  // happy laps: dash across, flip round, dash back, then rest
     float u = now - enterT;
-    float midY = L.round || L.compact ? L.artCy : (L.sq ? 66 : 82);
+    float midY = L.sq ? 66 : 82;
     if (u < 5) {
       int lap = (int)(u / 1.25f);
       g.tx = lap & 1 ? xMin : xMax;
@@ -1840,8 +1500,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   squash.step(dt, 400, 16);
   prog.step(dt, 4);
 
-  float bootS = L.compact ? 0.55f : (L.round ? 0.9f : 1.2f), doneS = L.compact || L.round ? L.spinS : 0.8f;
-  spS.target = screen == SC_BOOT ? bootS : (screen == SC_DONE ? doneS : L.spinS);
+  spS.target = screen == SC_BOOT ? 1.2f : (screen == SC_DONE ? 0.8f : L.spinS);
   spS.step(dt, 90, 16);
 
   Mood m = MOOD_IDLE;
@@ -1850,7 +1509,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   else if (screen == SC_DONE) m = MOOD_HAPPY;
   else if (screen == SC_MENU && !editing && !motorOn && now - lastInput > 60) m = MOOD_SLEEPY;
 
-  spHide.target = screen == SC_SETUP || (L.sq && screen == SC_CONNECT) || ((L.compact || L.round) && screen == SC_ABOUT) ? 1 : 0;
+  spHide.target = screen == SC_SETUP || (L.sq && screen == SC_CONNECT) ? 1 : 0;
   spHide.step(dt, 14);
   static Ease axoFade;
   axoFade.target = S.home == HOME_AXO ? 1 : 0;
@@ -1889,20 +1548,17 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
     }
   }
 
-  if (screen != SC_BOOT && !(L.round && screen == SC_PRINT)) drawTopBar(c);  // round: the ring is there
+  if (screen != SC_BOOT) drawTopBar(c);
   switch (screen) {
     case SC_BOOT: {
       float pop = easeOut(now / 0.6f), fade = 1 - clampf((now - 2.3f) / 0.3f, 0, 1);
-      float sz = L.round ? 96.f : (L.compact ? 56.f : (L.sq ? 104.f : 84.f));
-      float cy = L.round ? 98.f : (L.H - 34) / 2.f;
-      int ty = L.round ? 180 : L.H - 24, sy = L.round ? 202 : L.H - 6;
+      float sz = L.sq ? 104.f : 84.f;
+      float cy = (L.H - 34) / 2.f;
       c.glow(L.W / 2.f, cy, sz * 0.9f, HOT, 0.10f * pop * fade);
       drawLogo(c, L.W / 2.f, cy, sz * (0.7f + 0.3f * pop), pop * fade, (easeOut(now / 1.8f) - 1) * 6.2832f);
       float a = easeOut((now - 0.9f) / 0.6f) * fade;
-      char tl[64];
-      fitText(F_SM, T(S_TAGLINE), tl, sizeof tl, L.round ? 150 : L.W - 8);
-      c.textCentered(*FBIG, L.W / 2, (int)(ty + (1 - a) * 8), "SpinSlicer", PINK, a);
-      c.textCentered(F_SM, L.W / 2, (int)(sy + (1 - a) * 8), tl, DIM, a);
+      c.textCentered(F_LG, L.W / 2, (int)(L.H - 24 + (1 - a) * 8), "SpinSlicer", PINK, a);
+      c.textCentered(F_SM, L.W / 2, (int)(L.H - 6 + (1 - a) * 8), T(S_TAGLINE), DIM, a);
       break;
     }
     case SC_MENU:
@@ -1915,8 +1571,6 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
     case SC_ABOUT: drawAbout(c, dx, ca); break;
     case SC_CONNECT: drawConnect(c, dx, ca); break;
   }
-  // (on the stacked layouts the edit card covers the dial's band: the dial goes while it is open)
-  if (L.sq) da *= clampf(1 - edit.v * 1.6f, 0, 1);
   if (screen == SC_MENU && da > 0.01f) drawDial(c, L.artCx, L.artCy, L.dialR, da);
 
   drawConfirm(c);
@@ -1930,14 +1584,6 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   if (!still) stillSince = -1;
   else if (stillSince < 0) stillSince = now;
   return still && now - stillSince > 2 ? 30 : 60;
-}
-
-void ui_set_input(int mode) { inputMode = mode >= 1 && mode <= 3 ? mode : 1; }
-
-void ui_set_panel(const char* name, bool round) {
-  snprintf(panelName, sizeof panelName, "%s", name ? name : "");
-  roundPanel = round;
-  L.W = 0;  // lay out again on the next frame
 }
 
 void ui_stats(float frameMs, float kbPerFrame, float drawMs) {
