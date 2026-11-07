@@ -76,6 +76,7 @@ int main(int argc, char** argv) {
   int stopMs = 0;         // --until=MS: stop early
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "en")) s.lang = 1;
+    if (!strcmp(argv[i], "card")) s.home = HOME_CARD;   // the firmware default: the big PRINT card instead of Spinny
     if (!strncmp(argv[i], "--track=", 8)) track = fopen(argv[i] + 8, "w");
     if (!strncmp(argv[i], "--until=", 8)) stopMs = atoi(argv[i] + 8);
   }
@@ -83,19 +84,23 @@ int main(int argc, char** argv) {
   for (int ms = 1500; ms < 60000; ms += 1000) line(ms, "PING");
   line(1600, "URL http://192.168.1.42");
   line(1600, "HOST spinslicer.local");
+  line(1600, "NET SpinSlicer-5G");
   line(1600, "CAL 0 400");
   int T = 3000;
   bool axoDemo = false;
   for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "axo")) axoDemo = true;
+  bool idle = false;  // nobody touches the buttons: boot, then the main page
+  for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "idle")) idle = true;
   bool behave = false;
   for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "behave")) behave = true;
+  if (idle) { T = 8000; goto run; }
   if (behave) {  // Spinny on his own: scroll a bit, then leave him alone (food at ~30 s, sleep after 60 s)
     for (int i = 0; i < 6; i++) key(T + 400 + i * 500, i < 3 ? K_DOWN : K_UP);
     key(T + 4000, K_OK);  // a happy hop
     T = 95000;
     goto run;
   }
-  if (axoDemo) {  // Сервис -> Аксолотль: every colour, then hide him
+  if (axoDemo) {  // Сервис -> Кастомизация: every colour, then the next main-screen choice
     key(T, K_DOWN); key(T += 300, K_DOWN); key(T += 400, K_OK);
     for (int i = 0; i < 3; i++) key(T += 300, K_DOWN);
     key(T += 500, K_OK);                          // Аксолотль

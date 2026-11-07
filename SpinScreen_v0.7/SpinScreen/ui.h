@@ -4,6 +4,8 @@
 
 #include "gfx.h"
 
+enum Home { HOME_CARD, HOME_AXO, HOME_COUNT };
+
 enum Key { K_NONE, K_UP, K_DOWN, K_OK, K_BACK };
 
 struct Settings {
@@ -16,7 +18,7 @@ struct Settings {
   int dirInv;     // 1 = counter-clockwise
   float gear;     // motor turns per vial turn
   int dark;       // dim the screen while printing
-  int axo;        // show Spinny the axolotl
+  int home;       // main page: HOME_CARD (a big PRINT card on top) or HOME_AXO (Spinny at the side)
   int axoColor;   // colour morph (spinny.h MORPH_*)
 };
 
@@ -37,4 +39,4 @@ void ui_init(const UiHal& hal, const Settings& s, uint32_t nowMs);
 void ui_key(Key k, uint32_t nowMs);
 void ui_line(const char* line, uint32_t nowMs);  // a text line received from the Pi
 int ui_frame(Canvas& c, uint32_t nowMs, float subMs = 0);  // subMs: fraction of a millisecond, for even motion         // draw one frame; returns the frame rate it wants next (60/30/15)
-void ui_stats(float frameMs, float kbPerFrame);  // for the About screen
+void ui_stats(float frameMs, float kbPerFrame, float drawMs = -1);  // for the About screen

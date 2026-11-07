@@ -57,7 +57,7 @@ static void hSave(const Settings& s) {
   prefs.putUChar("dir", s.dirInv);
   prefs.putFloat("gear", s.gear);
   prefs.putUChar("dark", s.dark);
-  prefs.putUChar("axo", s.axo);
+  prefs.putUChar("home", s.home);
   prefs.putUChar("axoColor", s.axoColor);
 }
 static float hRpm() { return motor_rpm(); }
@@ -140,7 +140,8 @@ void setup() {
   s.dirInv = prefs.getUChar("dir", 0);
   s.gear = prefs.getFloat("gear", MOTOR_GEAR);
   s.dark = prefs.getUChar("dark", 1);
-  s.axo = prefs.getUChar("axo", 1);
+  s.home = prefs.getUChar("home", HOME_CARD);  // a new key: every board starts with the card, Spinny is opt-in
+  if (s.home >= HOME_COUNT) s.home = HOME_CARD;
   s.axoColor = prefs.getUChar("axoColor", 0);
 
   motor_init(toMotor(s));
@@ -202,8 +203,9 @@ void loop() {
   uint32_t bytes = display_push();
   uint32_t t2 = micros();
   workMs += ((t2 - t0) / 1000.f - workMs) * 0.05f;
-  if (capFps == 60 && workMs > 14.5f) capFps = 30;
-  else if (capFps == 30 && workMs < 9.f) capFps = 60;
-  (void)t1;
-  ui_stats((t2 - t0) / 1000.f, bytes / 1024.f);
+  // 60 needs the work done in 16.7 ms. The way back to 60 is close enough that a page slide
+  // (a short burst of heavy frames) does not leave a 320x240 screen stuck at 30 for good.
+  if (capFps == 60 && workMs > 15.5f) capFps = 30;
+  else if (capFps == 30 && workMs < 12.5f) capFps = 60;
+  ui_stats((t2 - t0) / 1000.f, bytes / 1024.f, (t1 - t0) / 1000.f);
 }

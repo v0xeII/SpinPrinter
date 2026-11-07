@@ -36,6 +36,8 @@ enum Str {
   S_DROPS, S_HOW, S_R_UNDER, S_R_OK, S_R_OVER, S_PI_LOST,
   // axolotl
   S_AXO, S_AXO_SHOW, S_AXO_COLOR, S_C_PINK, S_C_GOLD, S_C_WILD, S_C_BLACK, S_C_BLUE, S_C_RGB,
+  // customisation
+  S_CARD_PICK, S_HOME_CARD, S_HOME_AXO,
   S_COUNT
 };
 
@@ -62,7 +64,8 @@ static const char* const STR[2][S_COUNT] = {
         "оборотов", "расчёт", "без расчёта SpinSlicer: подбери обороты", "кадры неровно: экспортируй 30 к/с",
         "доза", "разгон мотора", "прогрев проектора", "пауза до света", "из",
         "пропуски кадров", "Как получилось?", "Недосвет", "Норма", "Пересвет", "Pi не отвечает: печать остановлена",
-        "Аксолотль", "Показывать", "Окраска", "Розовый", "Золотой", "Дикий", "Чёрный", "Голубой", "Радуга RGB",
+        "Кастомизация", "Главная", "Окраска", "Розовый", "Золотой", "Дикий", "Чёрный", "Голубой", "Радуга RGB",
+        "выбрать видео", "Карточка", "Аксолотль",
     },
     {
         "Print", "Connect", "Service",
@@ -86,6 +89,7 @@ static const char* const STR[2][S_COUNT] = {
         "turns", "plan", "no SpinSlicer plan: pick the turns", "uneven frames: export at 30 fps",
         "dose", "motor spin-up", "projector warm-up", "dark spin-up", "of",
         "dropped frames", "How did it come out?", "Under", "Good", "Over", "Pi not responding: print stopped",
-        "Axolotl", "Show", "Colour", "Pink", "Golden", "Wild", "Black", "Blue", "Rainbow RGB",
+        "Customize", "Home", "Colour", "Pink", "Golden", "Wild", "Black", "Blue", "Rainbow RGB",
+        "choose a video", "Card", "Axolotl",
     },
 };

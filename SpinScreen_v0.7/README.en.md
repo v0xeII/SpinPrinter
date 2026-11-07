@@ -3,7 +3,7 @@
 [Русский](README.md) · **English**
 
 Board: **ESP32-S3 Super Mini**, screen: **ST7789 1.9" 170×320** or **1.3"/1.54" 240×240**. Black
-background, pink UI, smooth animation, Spinny the axolotl swimming at the side, menus in Russian and English.
+background, pink UI, smooth animation, the SpinSlicer logo at boot, a big PRINT card on top of the main page, menus in Russian and English. Spinny the axolotl is optional.
 
 **Menu:**
 - **Print** → video list (USB stick in the Pi and Wi-Fi uploads) → setup: **turns** (from the SpinSlicer
@@ -14,7 +14,7 @@ background, pink UI, smooth animation, Spinny the axolotl swimming at the side, 
   - Projector: Black, White, Grid, Focus, Circle, Center, Vial width.
   - Motor: test spin, speed, direction, ramp, microsteps, steps per turn, gear, "exactly 1 turn", zero; a live tachometer.
   - Screen: brightness, language, dark screen while printing.
-  - Axolotl: show or hide (the menu then uses the whole screen), colour: pink, gold, wild, black, blue, RGB.
+  - Customize: **Home**: Card (default: PRINT as a big card on top, every page uses the whole width) or Axolotl (Spinny at the side of every page); **Colour** of the axolotl: pink, gold, wild, black, blue, RGB.
   - Raspberry Pi: reboot or shut down (with confirmation).
   - About.
 
@@ -106,6 +106,8 @@ to the bottom and sleeps after a minute without keys, dashes about on "Done!" an
 | `RPM 9.5` · `SPIN 1/0` | speed in rpm · motor on/off (with a ramp) |
 | `STATE PRINT/DONE/IDLE/ERROR text` · `PROG 42 80` | print state · progress 42 %, 80 s left |
 | `MSG text` | Spinny says it in a bubble |
+| `STATS` | for tuning: replies `STATS <fps> fps <work> ms <KB> KB draw <draw> ms scr <screen> page <page> sel <item>` |
+| `KEY u` / `d` / `o` / `b` | press up / down / OK / back (tests from a PC) |
 | `GET` | current settings |
 | `POS` | answers `POS <angle°> <rpm> <at speed 0/1>` within ~1 ms |
 | `ZERO` · `SETANGLE 12.5` | angle := 0 · angle := 12.5° |

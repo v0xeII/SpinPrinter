@@ -19,6 +19,7 @@
 #include "lang.h"
 #include "qrcodegen.h"
 #include "spinny.h"
+#include "logo.h"
 
 using namespace pal;
 
@@ -118,6 +119,9 @@ static Spring spS, squash;
 
 static Ease leftDial;
 static Ease spHide;  // Spinny fades out on full-width screens
+static Ease cardSel;  // how lit the PRINT card is (selected = 1)
+static Ease homeArt;  // the PRINT card on the main page (Кастомизация → Главная → Карточка)
+static Ease bootHide; // Spinny waits until the logo is gone
 static Mood tempMood = MOOD_IDLE;
 static float tempMoodUntil = -1, lastInput = 0;
 
@@ -139,6 +143,7 @@ static const int MAX_FILES = 16;
 static FileEntry files[MAX_FILES];
 static int nFiles = 0, nIncoming = 0;
 static bool listing = false;
+static int knownVideos = -1;  // from the last list the Pi sent; -1 = not asked yet
 static float listAskedT = -10;
 static float defFactor = 0, defDelay = 3;
 static int defTurns = 5;
@@ -218,7 +223,7 @@ static float frand(float a, float b) {
   rnd = rnd * 1664525u + 1013904223u;
   return a + (b - a) * ((rnd >> 8) & 0xFFFF) / 65535.f;
 }
-static float renderMs = 0, pushKB = 0;
+static float renderMs = 0, pushKB = 0, drawMsAvg = 0;
 
 static const char* T(Str s) { return STR[S.lang][s]; }
 static bool piOk() { return everRx && (now - lastRx) * 1000.f < PI_TIMEOUT_MS; }
@@ -329,7 +334,7 @@ static void itemValue(ItemId it, char* b, size_t n) {
     case I_LANG: snprintf(b, n, "%s", T(S_LANGNAME)); break;
     case I_DARK: snprintf(b, n, "%s", S.dark ? T(S_ON) : T(S_OFF)); break;
     case I_BACK: snprintf(b, n, "←"); break;
-    case I_AXO_SHOW: snprintf(b, n, "%s", S.axo ? T(S_ON) : T(S_OFF)); break;
+    case I_AXO_SHOW: snprintf(b, n, "%s", T(S.home == HOME_AXO ? S_HOME_AXO : S_HOME_CARD)); break;
     case I_AXO_COLOR: snprintf(b, n, "%s", T(MORPH_NAME[S.axoColor % MORPH_COUNT])); break;
     case I_P_BLACK: case I_P_WHITE: case I_P_GRID: case I_P_FOCUS: case I_P_CIRCLE:
     case I_ONEREV: case I_REBOOT: case I_POWEROFF: b[0] = 0; break;
@@ -520,10 +525,10 @@ static void activate() {
     case I_SCREEN: pushPage(PG_SCREEN); break;
     case I_PIMENU: pushPage(PG_PI); break;
     case I_AXO: pushPage(PG_AXO); break;
-    case I_AXO_SHOW: S.axo = !S.axo; H.save(S); break;
+    case I_AXO_SHOW: S.home = (S.home + 1) % HOME_COUNT; H.save(S); break;
     case I_AXO_COLOR:
       S.axoColor = (S.axoColor + 1) % MORPH_COUNT;
-      if (!S.axo) S.axo = 1;  // picking a colour brings him back
+      S.home = HOME_AXO;  // picking a colour brings him back
       H.save(S);
       mood(MOOD_HAPPY, 0.8f);
       break;
@@ -671,6 +676,7 @@ void ui_line(const char* line, uint32_t nowMs) {
       nFiles = 0;
     } else if (!strncmp(a, "END", 3)) {
       listing = false;
+      knownVideos = nFiles;
     } else {
       int i = 0, usb = 0, cad = 1, used = 0;
       float rpm = 0, plan = -1, tol = -1, revS = 0;
@@ -747,6 +753,16 @@ void ui_line(const char* line, uint32_t nowMs) {
     copyArg(fileName, sizeof fileName, line + 5);
   } else if (!strncmp(line, "MSG ", 4)) {
     say(line + 4, 3);
+  } else if (!strcmp(line, "STATS")) {  // for tuning: frame rate, work per frame, KB over SPI per frame
+    snprintf(b, sizeof b, "STATS %.1f fps %.2f ms %.1f KB draw %.2f ms scr %d page %d sel %d", (double)fps,
+             (double)renderMs, (double)pushKB, (double)drawMsAvg, (int)screen, pv.page, pv.sel);
+    H.send(b);
+    return;
+  } else if (!strncmp(line, "KEY ", 4)) {  // press a button from the PC: KEY u / d / o / b
+    char k = line[4];
+    Key kk = k == 'u' ? K_UP : k == 'd' ? K_DOWN : k == 'o' ? K_OK : k == 'b' ? K_BACK : K_NONE;
+    if (kk != K_NONE) ui_key(kk, nowMs);
+    return;
   } else if (!strcmp(line, "GET")) {
     char r[16];
     fmt2(r, sizeof r, S.rpm);
@@ -759,6 +775,92 @@ void ui_line(const char* line, uint32_t nowMs) {
     return;
   }
   H.send("OK");
+}
+
+// a filled triangle with rounded corners (rr), anti-aliased
+static void fillTriangle(Canvas& c, const float* px, const float* py, float rr, uint16_t col, float a) {
+  float bx0 = fmn(fmn(px[0], px[1]), px[2]), bx1 = fmx(fmx(px[0], px[1]), px[2]);
+  float by0 = fmn(fmn(py[0], py[1]), py[2]), by1 = fmx(fmx(py[0], py[1]), py[2]);
+  float X0 = px[0], Y0 = py[0], X1 = px[1], Y1 = py[1], X2 = px[2], Y2 = py[2];
+  c.shape(bx0 - rr, by0 - rr, bx1 + rr, by1 + rr, col, a, [=](float x, float y) {
+    // signed distance to a triangle (after Inigo Quilez), minus the rounding
+    float e0x = X1 - X0, e0y = Y1 - Y0, e1x = X2 - X1, e1y = Y2 - Y1, e2x = X0 - X2, e2y = Y0 - Y2;
+    float v0x = x - X0, v0y = y - Y0, v1x = x - X1, v1y = y - Y1, v2x = x - X2, v2y = y - Y2;
+    float t0 = clampf((v0x * e0x + v0y * e0y) / (e0x * e0x + e0y * e0y), 0, 1);
+    float t1 = clampf((v1x * e1x + v1y * e1y) / (e1x * e1x + e1y * e1y), 0, 1);
+    float t2 = clampf((v2x * e2x + v2y * e2y) / (e2x * e2x + e2y * e2y), 0, 1);
+    float q0x = v0x - e0x * t0, q0y = v0y - e0y * t0, q1x = v1x - e1x * t1, q1y = v1y - e1y * t1;
+    float q2x = v2x - e2x * t2, q2y = v2y - e2y * t2;
+    float d = fmn(fmn(q0x * q0x + q0y * q0y, q1x * q1x + q1y * q1y), q2x * q2x + q2y * q2y);
+    float sg = e0x * e2y - e0y * e2x > 0 ? 1.f : -1.f;
+    float c0 = sg * (v0x * e0y - v0y * e0x), c1 = sg * (v1x * e1y - v1y * e1x), c2 = sg * (v2x * e2y - v2y * e2x);
+    bool in = (c0 >= 0 && c1 >= 0 && c2 >= 0) || (c0 <= 0 && c1 <= 0 && c2 <= 0);
+    return (in ? -1.f : 1.f) * fsqrt(d) - rr;
+  });
+}
+
+// ================================================================ logo + main page
+// The SpinSlicer icon, from the numbers in assets/spinslicer.svg (a 256-unit tile): a pink tile
+// with round corners, a dark vial seen from above, the "S" (a bitmap made by gen/make_logo.py)
+// and the arrow round the vial. sz = tile size in px; rot turns the arrow (0 = as in the SVG).
+static void drawLogo(Canvas& c, float cx, float cy, float sz, float a, float rot) {
+  if (a <= 0.01f || sz < 8) return;
+  const uint16_t INK = hex(0x141217);
+  float k = sz / 256.f, ox = cx - sz / 2, oy = cy - sz / 2;
+  c.fillRoundRect(ox, oy, sz, sz, 56 * k, PINK, a);
+  c.fillCircle(cx, cy, 88 * k, INK, a);
+  // the S: sample the mask (bilinear) and hand it to shape() as "0.5 - coverage"
+  float mk = LOGO_S_SCALE / k;  // mask px per screen px
+  float sx0 = ox + LOGO_S_X0 * k, sy0 = oy + LOGO_S_Y0 * k;
+  c.shape(sx0, sy0, sx0 + LOGO_S_W / LOGO_S_SCALE * k, sy0 + LOGO_S_H / LOGO_S_SCALE * k, PINK, a,
+          [=](float x, float y) {
+            float u = (x - sx0) * mk - 0.5f, v = (y - sy0) * mk - 0.5f;
+            int iu = ifloor(u), iv = ifloor(v);
+            float fu = u - iu, fv = v - iv;
+            auto at = [](int i, int j) -> float {
+              return (i < 0 || j < 0 || i >= LOGO_S_W || j >= LOGO_S_H) ? 0.f : LOGO_S[j * LOGO_S_W + i];
+            };
+            float m = (at(iu, iv) * (1 - fu) + at(iu + 1, iv) * fu) * (1 - fv) +
+                      (at(iu, iv + 1) * (1 - fu) + at(iu + 1, iv + 1) * fu) * fv;
+            return 0.5f - m * (1.f / 255.f);
+          });
+  // the arrow: an arc (r 106, stroke 8, from -100° to -15°) and a rounded triangle at its end
+  c.arc(cx, cy, 106 * k, 8 * k, -1.745f + rot, -0.262f + rot, INK, a);
+  const float TX[3] = {234.7f, 241.6f, 219.2f}, TY[3] = {116.8f, 97.6f, 103.6f};
+  float px[3], py[3], cr = cosf(rot), sr = sinf(rot);
+  for (int i = 0; i < 3; i++) {
+    float dx = (TX[i] - 128) * k, dy = (TY[i] - 128) * k;
+    px[i] = cx + dx * cr - dy * sr;
+    py[i] = cy + dx * sr + dy * cr;
+  }
+  fillTriangle(c, px, py, 2 * k, INK, a);  // stroke-width 4 with round joins
+}
+
+// The card, across the top of the main page (shorter on 170 px high screens).
+static void cardRect(float& x, float& y, float& w, float& h) {
+  x = 8; y = 32; w = L.W - 16.f; h = L.H < 200 ? 58.f : 76.f;
+}
+
+// Main page with Кастомизация → Главная → Карточка: "Печать" (the first item of the main page) is
+// a big card on the left, the list on the right shows the rest. sel = how selected the card is
+// (0..1, follows the pill as it slides up into the card).
+static void drawHomeCard(Canvas& c, float a, float sel) {
+  if (a <= 0.01f) return;
+  float x, y, w, h;
+  cardRect(x, y, w, h);
+  x += (1 - a) * -16;
+  // no pulse and no glow: a still card costs nothing over SPI (a pulsing one resent ~50 KB a frame)
+  c.fillRoundRect(x, y, w, h, 16, lerpColor(PANEL, PINK, sel), a);
+  c.strokeRoundRect(x, y, w, h, 16, 1.5f, lerpColor(hex(0x5A3346), HOT, sel), a);
+  uint16_t ink = lerpColor(PINK, DARK, sel), sub = lerpColor(DIM, hex(0x5A2A3E), sel);
+  char b[48], s2[48];
+  if (!piOk()) snprintf(b, sizeof b, "%s", T(S_PI_NO));
+  else if (knownVideos > 0) snprintf(b, sizeof b, "%s: %d", T(S_FILES), knownVideos);
+  else snprintf(b, sizeof b, "%s", T(S_CARD_PICK));
+  c.text(F_LG, (int)(x + 18), (int)(y + h * 0.47f), T(S_PRINT_BTN), ink, a);
+  fitText(F_SM, b, s2, sizeof s2, (int)w - 70);
+  c.text(F_SM, (int)(x + 18), (int)(y + h * 0.78f), s2, sub, a);
+  c.text(F_LG, (int)(x + w - 40), (int)(y + h * 0.62f), "→", ink, a);
 }
 
 // ================================================================ drawing pieces
@@ -908,7 +1010,15 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
   float e = active ? clampf(edit.v, 0, 1.15f) : 0;
   float listA = alpha * clampf(1 - e * 1.6f, 0, 1);
   c.clip((int)LIST_X - 6, (int)LIST_CLIP, L.W, L.H);
-  float py = LIST_TOP + p.pill.v - p.scroll.v;
+  int skip = (p.page == PG_MAIN && S.home == HOME_CARD) ? 1 : 0;  // "Печать" is the card
+  float listTop = LIST_TOP;
+  if (skip) {  // the rest of the main page goes under the card
+    float cx, cy, cw, ch;
+    cardRect(cx, cy, cw, ch);
+    listTop = cy + ch + 23;
+    c.clip((int)LIST_X - 6, (int)(cy + ch + 4), L.W, L.H);
+  }
+  float py = listTop + p.pill.v - skip * ROW_H - p.scroll.v;
   if (p.page == PG_FILES && nFiles == 0) {  // loading / empty / no Pi
     bool loading = listing && now - listAskedT < 15;  // the Pi may be reading a big USB stick
     int x = (int)(LIST_X + 8 + dx);
@@ -928,10 +1038,11 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
   }
   if (listA > 0.01f) {
     float stretch = clampf(fabsf(p.pill.vel) * 0.012f, 0, 5);
-    c.fillRoundRect(LIST_X + dx, py - 13 - stretch / 2, LIST_W, 26 + stretch, 13, PINK, listA);
+    float pillA = skip ? clampf(p.pill.v / ROW_H, 0, 1) : 1;  // melts into the card on the way up
+    c.fillRoundRect(LIST_X + dx, py - 13 - stretch / 2, LIST_W, 26 + stretch, 13, PINK, listA * pillA);
     int n = pageCount(p);
-    for (int i = 0; i < n; i++) {
-      float ry = LIST_TOP + i * ROW_H - p.scroll.v;
+    for (int i = skip; i < n; i++) {
+      float ry = listTop + (i - skip) * ROW_H - p.scroll.v;
       if (ry < LIST_CLIP - 16 || ry > L.H + 16) continue;
       float k = clampf(1 - fabsf(ry - py) / ROW_H, 0, 1);
       ItemId it = itemAt(p, i);
@@ -1357,7 +1468,15 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   bool dial = (screen == SC_MENU && pv.page == PG_MOTOR) || screen == SC_PRINT || (screen == SC_CONNECT && qrOk);
   leftDial.target = dial ? 1 : 0;
   leftDial.step(dt, 8);
-  wide.target = (!S.axo && !dial) ? 1 : 0;
+  bool axoOn = S.home == HOME_AXO;
+  bool artOn = S.home == HOME_CARD && screen == SC_MENU && pv.page == PG_MAIN;
+  homeArt.target = artOn ? 1 : 0;
+  homeArt.step(dt, artOn ? 10 : 45);  // leaves fast, so it never ghosts through the next page
+  // the card lights up quickly (a few frames): its whole area changes while it fades, and on a
+  // slow SPI bus every one of those frames is expensive
+  cardSel.target = (pv.page == PG_MAIN && pv.sel == 0) ? 1 : 0;
+  cardSel.step(dt, 28);
+  wide.target = (!axoOn && !dial) ? 1 : 0;
   wide.step(dt, 9);
   float w = wide.v;
   LIST_X = L.lx[0] + (L.lx[1] - L.lx[0]) * w;
@@ -1367,8 +1486,9 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   VISIBLE = w > 0.5f ? L.vis[1] : L.vis[0];
 
   float top = pv.sel * ROW_H;
-  if (top - pv.scroll.target > (VISIBLE - 1) * ROW_H) pv.scroll.target = top - (VISIBLE - 1) * ROW_H;
-  if (top < pv.scroll.target) pv.scroll.target = top;
+  float vtop = (pv.page == PG_MAIN && S.home == HOME_CARD) ? fmx(top - ROW_H, 0) : top;  // rows under the card
+  if (vtop - pv.scroll.target > (VISIBLE - 1) * ROW_H) pv.scroll.target = vtop - (VISIBLE - 1) * ROW_H;
+  if (vtop < pv.scroll.target) pv.scroll.target = vtop;
   pv.pill.target = top;
   pv.pill.step(dt, 420, 30);
   pv.scroll.step(dt, 14);
@@ -1392,9 +1512,12 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   spHide.target = screen == SC_SETUP || (L.sq && screen == SC_CONNECT) ? 1 : 0;
   spHide.step(dt, 14);
   static Ease axoFade;
-  axoFade.target = S.axo ? 1 : 0;
+  axoFade.target = S.home == HOME_AXO ? 1 : 0;
   axoFade.step(dt, 10);
-  float sa = clampf(1 - leftDial.v * 1.6f, 0, 1) * (1 - spHide.v) * axoFade.v;
+  bootHide.target = 0;
+  bootHide.step(dt, 5);
+  if (screen == SC_BOOT) bootHide.v = 1;  // after the step, or he would show through a little
+  float sa = clampf(1 - leftDial.v * 1.6f, 0, 1) * (1 - spHide.v) * axoFade.v * (1 - bootHide.v);
   float da = clampf(leftDial.v * 1.6f - 0.6f, 0, 1);
 #ifdef UI_PROBE
   extern float ui_probe_sa;
@@ -1428,12 +1551,20 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   if (screen != SC_BOOT) drawTopBar(c);
   switch (screen) {
     case SC_BOOT: {
-      float a = easeOut((now - 0.9f) / 0.6f);
+      float pop = easeOut(now / 0.6f), fade = 1 - clampf((now - 2.3f) / 0.3f, 0, 1);
+      float sz = L.sq ? 104.f : 84.f;
+      float cy = (L.H - 34) / 2.f;
+      c.glow(L.W / 2.f, cy, sz * 0.9f, HOT, 0.10f * pop * fade);
+      drawLogo(c, L.W / 2.f, cy, sz * (0.7f + 0.3f * pop), pop * fade, (easeOut(now / 1.8f) - 1) * 6.2832f);
+      float a = easeOut((now - 0.9f) / 0.6f) * fade;
       c.textCentered(F_LG, L.W / 2, (int)(L.H - 24 + (1 - a) * 8), "SpinSlicer", PINK, a);
       c.textCentered(F_SM, L.W / 2, (int)(L.H - 6 + (1 - a) * 8), T(S_TAGLINE), DIM, a);
       break;
     }
-    case SC_MENU: drawMenu(c, dx, ca); break;
+    case SC_MENU:
+      if (homeArt.v > 0.08f) drawHomeCard(c, homeArt.v * ca, cardSel.v);
+      drawMenu(c, dx, ca);
+      break;
     case SC_SETUP: drawSetup(c, dx, ca, dt); break;
     case SC_PRINT: drawPrint(c, dx, ca); break;
     case SC_DONE: drawDone(c, dx, ca, dt); break;
@@ -1455,8 +1586,9 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   return still && now - stillSince > 2 ? 30 : 60;
 }
 
-void ui_stats(float frameMs, float kbPerFrame) {
+void ui_stats(float frameMs, float kbPerFrame, float drawMs) {
   renderMs += (frameMs - renderMs) * 0.1f;
+  if (drawMs >= 0) drawMsAvg += (drawMs - drawMsAvg) * 0.1f;
   pushKB += (kbPerFrame - pushKB) * 0.1f;
 }
 

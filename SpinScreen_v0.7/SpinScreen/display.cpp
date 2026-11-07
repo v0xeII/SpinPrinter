@@ -21,19 +21,33 @@ static const int W = DISPLAY_W, H = DISPLAY_H;
 static const int CHUNK_PX = 4096;  // pixels per DMA transaction (8 KB): small, so two 240x240 buffers still fit
 static spi_device_handle_t dev;
 static uint16_t* fbs[2] = {nullptr, nullptr};
-static uint16_t* stage[2] = {nullptr, nullptr};  // contiguous copies of narrow rectangles
+// Staging: a ring of chunks the pixels are copied into (byte-swapped) on their way to the DMA.
+// As many as RAM allows (up to 80 KB), so a whole frame's changes usually fit: display_push()
+// then returns at once and the next frame is drawn while the last one is still going out.
+static const int MAX_RING = 10;
+static uint16_t* ring[MAX_RING];
+static uint32_t ringSeq[MAX_RING];  // the transaction that last used each chunk
+static int nRing = 0, ringNext = 0;
+static uint32_t qSeq = 0, doneSeq = 0;  // transactions queued / finished (they finish in order)
 static int cur = 0, inflight = 0;
 static bool dbl = false, first = true;
-static spi_transaction_t trs[8];
+static spi_transaction_t trs[64];
 static int trNext = 0;
 static int offX = 0, offY = 0;
-static uint32_t bandHash[(DISPLAY_H + DIRTY_BAND - 1) / DIRTY_BAND];
+// one buffer only: a hash per tile (DIRTY_BAND rows x TILE_W columns) of the last frame sent, so
+// only the changed columns of a band go out, not the whole width (a pulsing dot used to cost a
+// full-width band: 10 KB per frame instead of 0.5 KB)
+static const int TILE_W = 16;
+static const int TILES_X = (DISPLAY_W + TILE_W - 1) / TILE_W;
+static uint32_t tileHash[(DISPLAY_H + DIRTY_BAND - 1) / DIRTY_BAND][TILES_X];
 
 static void IRAM_ATTR preCb(spi_transaction_t* t) {
   gpio_set_level((gpio_num_t)PIN_TFT_DC, (int)(intptr_t)t->user);
 }
 
+static void waitAll();
 static void sendBytes(const uint8_t* d, int n, int dc) {
+  waitAll();  // a polling send may not overtake queued transactions
   spi_transaction_t t = {};
   t.length = 8 * n;
   t.user = (void*)(intptr_t)dc;
@@ -55,29 +69,41 @@ static void waitOne() {
   spi_transaction_t* r;
   spi_device_get_trans_result(dev, &r, portMAX_DELAY);
   inflight--;
+  doneSeq++;
 }
 static void waitAll() {
   while (inflight > 0) waitOne();
 }
-static void queue(const void* data, int pixels) {
+// queue one transaction; dc = level of the D/C line (0 command, 1 data). Returns its number.
+static uint32_t queueTx(const void* data, int bytes, int dc) {
   if (inflight >= (int)(sizeof(trs) / sizeof(trs[0]))) waitOne();
   spi_transaction_t& t = trs[trNext];
   trNext = (trNext + 1) % (int)(sizeof(trs) / sizeof(trs[0]));
   memset(&t, 0, sizeof t);
-  t.length = pixels * 16;
-  t.tx_buffer = data;
-  t.user = (void*)1;
+  t.length = bytes * 8;
+  t.user = (void*)(intptr_t)dc;
+  if (bytes <= 4) {
+    t.flags = SPI_TRANS_USE_TXDATA;
+    memcpy(t.tx_data, data, bytes);
+  } else {
+    t.tx_buffer = data;
+  }
   spi_device_queue_trans(dev, &t, portMAX_DELAY);
   inflight++;
+  return ++qSeq;
 }
 
 static void window(int x, int y, int w, int h) {
   uint16_t x0 = x + offX, x1 = x + w - 1 + offX, y0 = y + offY, y1 = y + h - 1 + offY;
   uint8_t ca[4] = {(uint8_t)(x0 >> 8), (uint8_t)x0, (uint8_t)(x1 >> 8), (uint8_t)x1};
   uint8_t ra[4] = {(uint8_t)(y0 >> 8), (uint8_t)y0, (uint8_t)(y1 >> 8), (uint8_t)y1};
-  cmdData(0x2A, ca, 4);
-  cmdData(0x2B, ra, 4);
-  cmd(0x2C);  // memory write
+  // queued, not polled: no need to wait for the pixels of the previous rectangle first
+  static const uint8_t CASET = 0x2A, RASET = 0x2B, RAMWR = 0x2C;
+  queueTx(&CASET, 1, 0);
+  queueTx(ca, 4, 1);
+  queueTx(&RASET, 1, 0);
+  queueTx(ra, 4, 1);
+  queueTx(&RAMWR, 1, 0);  // memory write
 }
 
 bool display_init() {
@@ -136,12 +162,28 @@ bool display_init() {
   cmd(TFT_INVERT ? 0x21 : 0x20);
   cmd(0x13);  // normal display mode
 
+  // the small buffers first, so a big panel's framebuffers can never starve them;
+  // the second framebuffer only if enough RAM stays free for the rest of the firmware
+  // (two 320x240 buffers are 300 KB)
   size_t sz = W * H * 2;
+  for (nRing = 0; nRing < 2; nRing++) {
+    ring[nRing] = (uint16_t*)heap_caps_malloc(CHUNK_PX * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!ring[nRing]) return false;
+    ringSeq[nRing] = 0;
+  }
   fbs[0] = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
   fbs[1] = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  stage[0] = (uint16_t*)heap_caps_malloc(CHUNK_PX * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  stage[1] = (uint16_t*)heap_caps_malloc(CHUNK_PX * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  if (!fbs[0] || !stage[0] || !stage[1]) return false;
+  if (fbs[1] && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 48 * 1024) {
+    heap_caps_free(fbs[1]);
+    fbs[1] = nullptr;
+  }
+  if (!fbs[0]) return false;
+  // more staging chunks while RAM stays comfortable for the rest of the firmware
+  while (nRing < MAX_RING && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) > 56 * 1024) {
+    ring[nRing] = (uint16_t*)heap_caps_malloc(CHUNK_PX * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!ring[nRing]) break;
+    ringSeq[nRing++] = 0;
+  }
   dbl = fbs[1] != nullptr;
   memset(fbs[0], 0, sz);
   first = true;
@@ -169,49 +211,90 @@ static inline void swapCopy(uint16_t* dst, const uint16_t* src, int n) {
 }
 
 static uint32_t sendRect(const uint16_t* b, const DirtyRect& r) {
-  waitAll();  // commands go out directly, nothing may be queued
   window(r.x, r.y, r.w, r.h);
-  // rows are copied into a staging buffer (two, used in turn) and byte-swapped on the way
-  // (the panel wants big-endian pixels). The framebuffers stay untouched, so the next frame can
-  // be drawn and compared while the last pieces are still going out.
-  int rowsPer = CHUNK_PX / r.w, s = 0;
+  // rows are copied into the staging ring and byte-swapped on the way (the panel wants big-endian
+  // pixels). The framebuffers stay untouched, so the next frame can be drawn and compared while
+  // these pieces are still going out.
+  int rowsPer = CHUNK_PX / r.w;
   for (int y = r.y; y < r.y + r.h; y += rowsPer) {
     int rows = r.y + r.h - y < rowsPer ? r.y + r.h - y : rowsPer;
-    if (inflight >= 2) waitOne();  // the staging buffer we are about to fill is free again
-    uint16_t* dst = stage[s];
-    for (int k = 0; k < rows; k++) swapCopy(dst + k * r.w, b + (y + k) * W + r.x, r.w);
-    queue(dst, rows * r.w);
-    s ^= 1;
+    int k = ringNext;
+    ringNext = (ringNext + 1) % nRing;
+    while (doneSeq < ringSeq[k]) waitOne();  // this chunk is still being sent
+    uint16_t* dst = ring[k];
+    for (int j = 0; j < rows; j++) swapCopy(dst + j * r.w, b + (y + j) * W + r.x, r.w);
+    ringSeq[k] = queueTx(dst, rows * r.w * 2, 1);
   }
   return (uint32_t)r.w * r.h * 2;
 }
 
 uint32_t display_push() {
   uint16_t* b = fbs[cur];
-  static DirtyRect rects[12];
+  static const int MAXRECTS = 24;
+  static DirtyRect rects[MAXRECTS];
   int n;
   if (first) {
     rects[0] = {0, 0, W, H};
     n = 1;
   } else if (dbl) {  // the other buffer = what is on the screen now
-    n = dirtyRects(b, fbs[cur ^ 1], W, H, rects, 12);
-  } else {  // one buffer only: remember a hash per band instead of the whole frame
+    n = dirtyRects(b, fbs[cur ^ 1], W, H, rects, MAXRECTS);
+  } else {  // one buffer only: compare tile hashes with the last frame sent
+    // Each band is cut into runs of changed tiles (a clean gap of GAP tiles or more splits them),
+    // and a run continues the rectangle above it when it has the same columns. So a card on the
+    // left and a pill on the right go out as two narrow rectangles, not one full-width one.
+    const int GAP = 3, MAXRUN = 4;
+    struct Open { int x0, x1, y0; bool used; } open[MAXRUN];
+    int nOpen = 0;
     n = 0;
-    int open = -1;
+    auto emit = [&](int x0, int x1, int y0, int y1) {
+      if (n < MAXRECTS) { rects[n++] = {x0, y0, x1 - x0, y1 - y0}; return; }
+      DirtyRect& r = rects[MAXRECTS - 1];  // out of slots: grow the last one
+      int rx1 = r.x + r.w, ry1 = r.y + r.h;
+      if (x0 < r.x) r.x = x0;
+      if (y0 < r.y) r.y = y0;
+      if (x1 > rx1) rx1 = x1;
+      if (y1 > ry1) ry1 = y1;
+      r.w = rx1 - r.x;
+      r.h = ry1 - r.y;
+    };
     for (int band = 0, y0 = 0; y0 < H; band++, y0 += DIRTY_BAND) {
       int y1 = y0 + DIRTY_BAND > H ? H : y0 + DIRTY_BAND;
-      uint32_t h = 2166136261u;
-      const uint32_t* q = (const uint32_t*)(b + y0 * W);
-      for (int i = 0; i < (y1 - y0) * W / 2; i++) h = (h ^ q[i]) * 16777619u;
-      bool ch = h != bandHash[band];
-      bandHash[band] = h;
-      if (ch && open < 0) open = y0;
-      if ((!ch || y1 == H) && open >= 0 && n < 12) {
-        int ye = ch ? y1 : y0;
-        rects[n++] = {0, open, W, ye - open};
-        open = -1;
+      uint32_t h[TILES_X];
+      for (int t = 0; t < TILES_X; t++) h[t] = 2166136261u;
+      for (int y = y0; y < y1; y++) {
+        const uint32_t* q = (const uint32_t*)(b + y * W);
+        for (int t = 0, i = 0; t < TILES_X; t++) {
+          int e = (t + 1) * TILE_W / 2 < W / 2 ? (t + 1) * TILE_W / 2 : W / 2;
+          uint32_t v = h[t];
+          for (; i < e; i++) v = (v ^ q[i]) * 16777619u;
+          h[t] = v;
+        }
+      }
+      // runs of changed tiles in this band
+      int rx0[MAXRUN], rx1[MAXRUN], nr = 0, last = -100;
+      for (int t = 0; t < TILES_X; t++) {
+        if (h[t] == tileHash[band][t]) continue;
+        tileHash[band][t] = h[t];
+        if (nr > 0 && (t - last <= GAP || nr == MAXRUN)) rx1[nr - 1] = t;
+        else { rx0[nr] = t; rx1[nr] = t; nr++; }
+        last = t;
+      }
+      for (int k = 0; k < nOpen; k++) open[k].used = false;
+      for (int r = 0; r < nr; r++) {
+        int x0 = rx0[r] * TILE_W, x1 = (rx1[r] + 1) * TILE_W > W ? W : (rx1[r] + 1) * TILE_W;
+        int k = 0;
+        while (k < nOpen && !(open[k].x0 == x0 && open[k].x1 == x1 && !open[k].used)) k++;
+        if (k < nOpen) { open[k].used = true; continue; }  // same columns as the band above: grow it
+        if (nOpen < MAXRUN) open[nOpen++] = {x0, x1, y0, true};
+        else emit(x0, x1, y0, y1);
+      }
+      for (int k = 0; k < nOpen;) {  // rectangles that did not go on: close them
+        if (open[k].used) { k++; continue; }
+        emit(open[k].x0, open[k].x1, open[k].y0, y0);
+        open[k] = open[--nOpen];
       }
     }
+    for (int k = 0; k < nOpen; k++) emit(open[k].x0, open[k].x1, open[k].y0, H);
   }
   uint32_t bytes = 0;
   for (int i = 0; i < n; i++) bytes += sendRect(b, rects[i]);

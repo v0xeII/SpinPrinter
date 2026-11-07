@@ -198,7 +198,7 @@ static void injectThread(std::string path) {
 // ============================================================================ UI hardware hooks
 static bool EN = false;  // --lang=en: English UI and window texts
 #define TR(ru, en) (EN ? (en) : (ru))
-static Settings S0{RPM_DEFAULT, 0, 80, MOTOR_MICROSTEPS, MOTOR_STEPS_PER_REV, MOTOR_ACCEL_RPM_S, 0, MOTOR_GEAR, 1, 1, 0};
+static Settings S0{RPM_DEFAULT, 0, 80, MOTOR_MICROSTEPS, MOTOR_STEPS_PER_REV, MOTOR_ACCEL_RPM_S, 0, MOTOR_GEAR, 1, HOME_CARD, 0};
 static int brightness = 80;
 static void hSend(const char* l) { sendLine(l); }
 static void hSpin(bool on, float rpm) {
