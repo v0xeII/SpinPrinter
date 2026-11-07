@@ -52,7 +52,11 @@ def save_json(path, obj, **kw):
 
 # =============================================================================== ESP32 link
 class Esp:
-    """Line protocol over USB serial (see SpinScreen README)."""
+    """Line protocol over serial (see SpinScreen README): the USB cable or three wires to the Pi's
+    UART (GPIO14/15 = /dev/serial0). Every candidate port is tried in turn until one answers PING,
+    and if the ESP goes quiet the search starts again, so moving from wires to cable just works."""
+
+    SILENT_S = 3.0  # no PONG for this long: not (or no longer) the ESP's port
 
     def __init__(self, port_hint, on_event):
         self.port_hint = port_hint
@@ -64,13 +68,37 @@ class Esp:
         self.connected = False
         self.version = ""
         self.greeting = []  # lines re-sent whenever the ESP (re)connects
+        self.port = ""
+        self._next = 0  # which candidate to try next
+        self.last_pong = 0.0
         threading.Thread(target=self._run, daemon=True).start()
 
+    def _candidates(self):
+        if self.port_hint:  # --serial: one port, or several separated by commas
+            return [p for p in self.port_hint.split(",") if p]
+        usb = sorted(glob.glob("/dev/serial/by-id/*Espressif*"))
+        real = {os.path.realpath(p) for p in usb}
+        usb += [p for p in sorted(glob.glob("/dev/ttyACM*")) if os.path.realpath(p) not in real]
+        # Raspberry Pi GPIO14/15: /dev/serial0 on Raspberry Pi OS, ttyAMA0 itself on SpinOS
+        wires = next(([p] for p in ("/dev/serial0", "/dev/ttyAMA0") if os.path.exists(p)), [])
+        return usb + wires
+
     def _find_port(self):
-        if self.port_hint:
-            return self.port_hint
-        cands = sorted(glob.glob("/dev/serial/by-id/*Espressif*")) + sorted(glob.glob("/dev/ttyACM*"))
-        return cands[0] if cands else None
+        cands = self._candidates()
+        if not cands:
+            return None
+        port = cands[self._next % len(cands)]
+        self._next += 1
+        return port
+
+    def _drop(self, why):
+        log("ESP:", why)
+        try:
+            self.ser.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self.ser = None
+        self.connected = False
 
     def _run(self):
         last_ping = 0
@@ -83,12 +111,14 @@ class Esp:
                     continue
                 try:
                     self.ser = serial.Serial(port, 115200, timeout=0.05)
-                    log("ESP: opened", port)
+                    self.ser.reset_input_buffer()
+                    self.port, opened = port, time.monotonic()
+                    self.last_pong = 0.0
                     self.hello()
                 except Exception as e:  # noqa: BLE001
                     log("ESP: cannot open", port, e)
                     self.ser = None
-                    time.sleep(2)
+                    time.sleep(1)
                     continue
             try:
                 if time.time() - last_ping > 1:
@@ -97,15 +127,24 @@ class Esp:
                 raw = self.ser.readline()
                 if raw:
                     self._handle(raw.decode("utf-8", "replace").strip())
+                quiet = time.monotonic() - max(self.last_pong, opened)
+                if quiet > self.SILENT_S:  # nobody answers PING here: try the next port
+                    if self.connected:
+                        self._drop(f"silent on {self.port}, looking again")
+                    else:
+                        self._drop_quiet()
             except Exception as e:  # noqa: BLE001
-                log("ESP: lost", e)
-                try:
-                    self.ser.close()
-                except Exception:  # noqa: BLE001
-                    pass
-                self.ser = None
-                self.connected = False
+                self._drop(f"lost ({e})")
                 time.sleep(1)
+
+    def _drop_quiet(self):
+        try:
+            self.ser.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self.ser = None
+        if len(self._candidates()) <= 1:
+            time.sleep(1)  # the only port: keep knocking, but not in a tight loop
 
     def hello(self):
         for line in list(self.greeting):
@@ -119,8 +158,10 @@ class Esp:
                 self.pos_cv.notify_all()
         elif line.startswith("PONG"):
             if not self.connected:
-                log("ESP:", line)
+                log("ESP:", line, "on", self.port)
+                self.hello()  # the greeting may have gone to a port that was not listening yet
             self.connected = True
+            self.last_pong = time.monotonic()
             self.version = line.split()[-1]
         elif line.startswith("READY"):  # ESP rebooted
             self.hello()

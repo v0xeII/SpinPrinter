@@ -14,9 +14,10 @@ hdmi_force_hotplug=1
 disable_overscan=1
 gpu_mem=64
 
-# serial console on the GPIO pins (for debugging), Bluetooth on the mini UART
-dtoverlay=miniuart-bt
+# GPIO14/15 (pins 8, 10) are the three-wire link to the ESP32 (or the USB cable, either works):
+# the PL011 UART goes there, Bluetooth is not used, and no console talks on it
 enable_uart=1
+dtoverlay=disable-bt
 
 # not needed
 dtparam=audio=off

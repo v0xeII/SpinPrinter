@@ -3,9 +3,10 @@
 # Copy the whole SpinPrinter folder to the Pi, then:  bash SpinPi/install.sh
 set -e
 cd "$(dirname "$0")"
-echo "== 1/5 packages (ffmpeg, python3-serial, compiler for SpinProj, mpv as the old fallback)"
+echo "== 1/5 packages (ffmpeg, python3-serial, the compiler for SpinProj)"
 sudo apt-get update
-sudo apt-get install -y ffmpeg python3-serial mpv gcc make pkg-config liblz4-dev libdrm-dev
+sudo apt-get install -y --no-install-recommends ffmpeg python3-serial gcc make pkg-config libc6-dev liblz4-dev libdrm-dev avahi-daemon
+# the old video player (spinpi.py --engine mpv) is not needed any more:  sudo apt install mpv
 echo "== 2/5 SpinProj (frames by angle)"
 if [ -d ../SpinProj ]; then
   make -C ../SpinProj NO_SDL=1 clean spinproj

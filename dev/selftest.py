@@ -107,7 +107,12 @@ def main():
 
         print("\n1. Печать с экрана ESP32 кнопками")
         time.sleep(max(0, 3.2 - 0))  # the boot screen leaves by itself after 2.6 s
-        b.keys("KEY OK", "KEY OK", "KEY OK", gap=1.0)  # Печать → first video → ПЕЧАТЬ
+        b.keys("KEY OK", gap=0.2)  # Печать: the list comes from the Pi (ffprobe on a fresh library can take a while)
+        t_list = time.time()
+        while "PI > FL END" not in open(b.log.name).read() and time.time() - t_list < 30:
+            time.sleep(0.2)
+        time.sleep(0.8)
+        b.keys("KEY OK", "KEY OK", gap=1.0)  # first video → ПЕЧАТЬ
         s = b.wait(lambda s: s["state"] in ("print", "error"), 30)
         check("кнопка ПЕЧАТЬ на экране запустила печать", s["state"] == "print", s["msg"])
         s = b.wait(lambda s: s["state"] in ("done", "error", "idle"), 30)

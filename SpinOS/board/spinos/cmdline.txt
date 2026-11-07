@@ -1,1 +1,1 @@
-root=/dev/mmcblk0p2 rootfstype=squashfs ro rootwait console=ttyAMA0,115200 quiet loglevel=3 vt.global_cursor_default=0 consoleblank=0 isolcpus=3 nohz_full=3 rcu_nocbs=3
+root=/dev/mmcblk0p2 rootfstype=squashfs ro rootwait quiet loglevel=3 vt.global_cursor_default=0 consoleblank=0 isolcpus=3 nohz_full=3 rcu_nocbs=3
