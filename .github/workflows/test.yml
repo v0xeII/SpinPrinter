@@ -19,6 +19,8 @@ jobs:
           make -C SpinScreen_v0.7/sim virtual_esp
       - name: SpinProj bench (null output, PC numbers, not the Pi's)
         run: SpinProj/spinproj bench --out null --seconds 2
+      - name: SpinPi unit tests (.spin, API, mDNS; no hardware, no ffmpeg needed)
+        run: python3 -m unittest discover -v tests
       - name: self-test
         run: python3 dev/selftest.py
       - uses: actions/upload-artifact@v4
