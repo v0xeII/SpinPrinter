@@ -106,5 +106,5 @@ def start_esp(extra=(), log=None):
 
 def start_pi(tty, port, data, usb, out="sdl", projector="1280x800", log=None):
     cmd = [sys.executable, SPINPI, "--serial", tty, "--port", str(port), "--data", data, "--usb-dir", usb,
-           "--hdmi", "ignore", "--projector", projector, "--spinproj", SPINPROJ, f"--spinproj-arg=--out={out}"]
+           "--hdmi", "ignore", "--avahi-dir", "", "--projector", projector, "--spinproj", SPINPROJ, f"--spinproj-arg=--out={out}"]
     return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)

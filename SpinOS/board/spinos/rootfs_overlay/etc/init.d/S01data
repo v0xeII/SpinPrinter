@@ -19,6 +19,7 @@ start)
 		sync
 	fi
 	mkdir -p /data/spinpi /data/wifi /data/ssh
+	mkdir -p /run/avahi-services  # /etc/avahi/services points here (spinpi.py writes the mDNS service)
 	;;
 stop)
 	sync
