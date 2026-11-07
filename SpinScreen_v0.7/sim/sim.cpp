@@ -18,6 +18,7 @@ static int dirSign = 1;
 struct Ev { int ms; Key k; const char* line; };
 static std::vector<Ev> ev;
 static int nowMs = 0;
+static bool lit = false;  // the projector light (for the demo animation): on from the first PROG to DONE
 static void line(int ms, const char* l) { ev.push_back({ms, K_NONE, strdup(l)}); }
 static void key(int ms, Key k) { ev.push_back({ms, k, nullptr}); }
 static void hSend(const char* l) {
@@ -33,6 +34,8 @@ static void hSend(const char* l) {
   if (!strncmp(l, "EV PRINT", 8)) {
     int t = nowMs + 300;
     line(t, "FILE lattice_cube_1280x800.mp4");
+    line(t, "RPM 10");
+    line(t, "SPIN 1");
     line(t, "STATE PRINT");
     line(t, "TURNS 6");
     line(t + 100, "WAIT 2 spin");
@@ -69,6 +72,13 @@ int main(int argc, char** argv) {
   Canvas c(W, H, fb.data());
   UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove};
   Settings s{4.0f, 0, 80, 16, 200, 6.f, 0, 1.0f, 1, 1, 0};
+  FILE* track = nullptr;  // --track=FILE: "ms angle lit" per frame, for dev/make_demo.py
+  int stopMs = 0;         // --until=MS: stop early
+  for (int i = 1; i < argc; i++) {
+    if (!strcmp(argv[i], "en")) s.lang = 1;
+    if (!strncmp(argv[i], "--track=", 8)) track = fopen(argv[i] + 8, "w");
+    if (!strncmp(argv[i], "--until=", 8)) stopMs = atoi(argv[i] + 8);
+  }
   ui_init(hal, s, 0);
   for (int ms = 1500; ms < 60000; ms += 1000) line(ms, "PING");
   line(1600, "URL http://192.168.1.42");
@@ -125,7 +135,7 @@ int main(int argc, char** argv) {
   key(T += 700, K_DOWN); key(T += 400, K_OK);     // Выключить -> Точно?
   key(T += 1500, K_BACK);
 run:
-  int endMs = T + 1200;
+  int endMs = stopMs ? stopMs : T + 1200;
 
   std::vector<unsigned char> rgb(W * H * 3);
   const int fps = 60;
@@ -135,7 +145,12 @@ run:
     for (size_t i = 0; i < ev.size(); i++) {
       Ev e = ev[i];
       if (e.ms > prev && e.ms <= ms) {
-        if (e.line) { fprintf(stderr, "PI > %s\n", e.line); ui_line(e.line, ms); }
+        if (e.line) {
+          fprintf(stderr, "PI > %s\n", e.line);
+          ui_line(e.line, ms);
+          if (!strncmp(e.line, "PROG", 4)) lit = true;
+          if (!strncmp(e.line, "STATE DONE", 10)) lit = false;
+        }
         else ui_key(e.k, ms);
       }
     }
@@ -149,6 +164,7 @@ run:
       if (moveLeft <= 0) { curRpm = tgtRpm = 0; moveLeft = -1; }
     }
     (void)ui_frame(c, ms);
+    if (track) fprintf(track, "%d %.3f %d\n", ms, angle, lit ? 1 : 0);
     for (int i = 0; i < W * H; i++) {
       uint16_t p = fb[i];
       rgb[i * 3] = (p >> 11) << 3 | (p >> 13);

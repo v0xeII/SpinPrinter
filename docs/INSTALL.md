@@ -47,7 +47,7 @@ With the card in the reader, from the SpinPrinter folder:
 ```bash
 sudo bash SpinPi/make_sd_card.sh
 ```
-It finds the card and asks "да" (yes), wipes it, writes Raspberry Pi OS Lite, asks for your Wi-Fi
+It finds the card and asks you to type "yes", wipes it, writes Raspberry Pi OS Lite, asks for your Wi-Fi
 (only you see the password) and sets up SSH login with this computer's key, no password. The Pi
 installs SpinPi by itself on the first start: 10–20 minutes, keep it powered meanwhile.
 
@@ -65,9 +65,10 @@ Wire everything with the power off.
 
 ## 4. First print
 
-1. Switch the Pi on. When the ESP screen says **"Pi на связи"** (Pi connected), it is ready.
-2. Open `http://spinslicer.local` (or scan the QR code: ESP screen → Подключение / Connect).
-3. **Сервис → Проектор** (Service → Projector) on the ESP screen: "Grid" and "Center" to focus and find the vial axis.
+1. Switch the Pi on. When the ESP screen says **"Pi connected"**, it is ready. (The screen speaks English
+   and Russian: Service → Display → Language.)
+2. Open `http://spinslicer.local` (or scan the QR code: ESP screen → Connect).
+3. **Service → Projector** on the ESP screen: "Grid" and "Centering" to focus and find the vial axis.
 4. In SpinSlicer: Print → **"to printer"** → "Send to printer". Or drop the video on the printer page,
    or bring it on a USB stick.
 5. After the print, answer "Under / Good / Over" on the screen: the printer adjusts the exposure itself.
@@ -76,7 +77,7 @@ Wire everything with the power off.
 
 | you see | do this |
 |---|---|
-| no "Pi на связи" | wait 20 minutes after the first start; check the cable (data) or that TX/RX are crossed |
+| no "Pi connected" | wait 20 minutes after the first start; check the cable (data) or that TX/RX are crossed |
 | "Undervoltage" on a monitor | another 5 V 2.5 A supply, a short thick micro-USB cable without adapters |
 | `spinslicer.local` does not open | are the PC and the Pi on the same network? On Windows without Bonjour use the IP from the ESP screen |
 | way B: the Pi did not come up | put the card in a computer: the `bootfs` partition holds a boot diary, `spinprinter-log.txt` |

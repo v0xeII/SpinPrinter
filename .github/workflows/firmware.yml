@@ -31,7 +31,7 @@ jobs:
           # but with the firmware just built here; served at /flasher/ and, for Actions-mode Pages, at /
           rm -rf site && mkdir -p site
           cp -r flasher site/flasher
-          cp docs/wiring.svg site/flasher/wiring.svg
+          cp docs/wiring.svg docs/wiring.ru.svg site/flasher/
           mkdir -p site/flasher/fw
           cp build/SpinScreen.ino.bootloader.bin site/flasher/fw/bootloader.bin
           cp build/SpinScreen.ino.partitions.bin site/flasher/fw/partitions.bin
@@ -60,8 +60,9 @@ jobs:
     permissions:
       contents: write
   pages:
-    # only when Pages is set to "GitHub Actions"; in branch mode GitHub publishes main by itself
-    if: github.ref == 'refs/heads/main' && vars.PAGES_FROM_ACTIONS == 'true'
+    # Pages set to "GitHub Actions": publish this build. Set to "Deploy from a branch": GitHub
+    # publishes main by itself (flasher/ is committed), so nothing to do here.
+    if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -71,5 +72,11 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
+      - id: mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "type=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .build_type 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
       - id: deploy
+        if: steps.mode.outputs.type != 'legacy'
+        continue-on-error: true  # the mode could not be read and Pages is in branch mode: not an error
         uses: actions/deploy-pages@v4

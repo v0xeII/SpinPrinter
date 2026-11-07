@@ -13,6 +13,11 @@ Raspberry Pi software, the angle-locked projector and a system image.
                                    └──USB or 4 wires──► ESP32-S3 (screen, buttons, motor)
 ```
 
+![SpinPrinter at work: the real screen UI and the projector following the vial angle](docs/demo.gif)
+
+*The real firmware UI (left) through a whole print, and what the projector shows (right): the frame
+always belongs to the vial's angle, the light is on only during the exposure.*
+
 **The main difference from OpenCAL:** the projector shows the frame for the **vial's angle**, not
 for the time. The ESP32 counts every motor step, and on every projector refresh the frame for
 the current angle goes up. The video cannot drift, and the light goes off after exactly N turns.
@@ -81,7 +86,7 @@ sudo apt install build-essential pkg-config liblz4-dev libsdl2-dev libdrm-dev ff
 sudo pacman -S --needed base-devel lz4 sdl2 libdrm ffmpeg python-pyserial
 
 python3 dev/bench.py      # screen and projector windows + the printer page in the browser
-python3 dev/selftest.py   # self-test, about 2 minutes: "22 из 22 проверок прошли" (22 of 22 passed)
+python3 dev/selftest.py   # self-test, about 2 minutes, 22 checks
 ```
 
 Screen keys: ↑ ↓, Enter = OK, Esc = back. **F** in the ESP32 window makes the board "hang": the

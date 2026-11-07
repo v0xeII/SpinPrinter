@@ -62,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.
 (10–20 минут). Запустить ещё раз = обновить.
 
 ### 4. Подключить
-- ESP32 с экраном: USB-кабелем в Pi **или** 4 проводами к гребёнке ([схема](../docs/wiring.svg)).
+- ESP32 с экраном: USB-кабелем в Pi **или** 4 проводами к гребёнке ([схема](../docs/wiring.ru.svg)).
 - Проектор: HDMI в Pi.
 - На экране ESP: **Подключение** → QR-код с адресом.
 

@@ -28,7 +28,7 @@ Step by step with pictures: [docs/INSTALL.md](../docs/INSTALL.md).
 ```
 sudo bash SpinPi/make_sd_card.sh
 ```
-It finds the card, asks "да" (yes) and your Wi-Fi, wipes the card, writes Raspberry Pi OS Lite
+It finds the card, asks you to type "yes" and your Wi-Fi, wipes the card, writes Raspberry Pi OS Lite
 64-bit, sets up SSH login with this computer's key and keeps the screen black. The Pi installs
 SpinPi and SpinProj by itself on the first start (10–20 minutes, needs internet).
 
@@ -41,7 +41,7 @@ SpinPi and SpinProj by itself on the first start (10–20 minutes, needs interne
    curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash
    ```
 4. Connect the ESP32 (USB cable **or** 4 wires, see the [wiring diagram](../docs/wiring.svg)) and the
-   projector (HDMI). The ESP screen → **Подключение** (Connect) shows the QR code with the address.
+   projector (HDMI). The ESP screen → **Connect** shows the QR code with the address.
 
 ## Printing
 

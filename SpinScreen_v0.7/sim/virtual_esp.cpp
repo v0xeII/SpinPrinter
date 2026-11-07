@@ -196,6 +196,8 @@ static void injectThread(std::string path) {
 }
 
 // ============================================================================ UI hardware hooks
+static bool EN = false;  // --lang=en: English UI and window texts
+#define TR(ru, en) (EN ? (en) : (ru))
 static Settings S0{RPM_DEFAULT, 0, 80, MOTOR_MICROSTEPS, MOTOR_STEPS_PER_REV, MOTOR_ACCEL_RPM_S, 0, MOTOR_GEAR, 1, 1, 0};
 static int brightness = 80;
 static void hSend(const char* l) { sendLine(l); }
@@ -274,7 +276,7 @@ static void drawChrome(Canvas& c, int sx, int sy, int sw, int sh, Btn* b, int nb
   // side panel: motor + link
   int px = sx + sw + 44, pw = W - px - 24;
   c.fillRoundRect(px, 24, pw, H - 48, 18, PANEL);
-  c.text(F_MD, px + 18, 54, "Виртуальный ESP32", LIGHT);
+  c.text(F_MD, px + 18, 54, TR("Виртуальный ESP32", "Virtual ESP32"), LIGHT);
   c.text(F_SM, px + 18, 76, tty, DIM);
   float cx = px + 70, cy = 150, R = 50;
   double ang = motorAngle();
@@ -291,14 +293,14 @@ static void drawChrome(Canvas& c, int sx, int sy, int sw, int sh, Btn* b, int nb
   char b2[96];
   snprintf(b2, sizeof b2, "%.2f", (double)rpm);
   c.text(F_LG, px + 140, 146, b2, rpm > 0.01f ? PINK : DIM);
-  c.text(F_SM, px + 140, 168, "об/мин флакона", DIM);
-  snprintf(b2, sizeof b2, "угол %.1f°", fmod(ang, 360.0) < 0 ? fmod(ang, 360.0) + 360 : fmod(ang, 360.0));
+  c.text(F_SM, px + 140, 168, TR("об/мин флакона", "vial rpm"), DIM);
+  snprintf(b2, sizeof b2, TR("угол %.1f°", "angle %.1f°"), fmod(ang, 360.0) < 0 ? fmod(ang, 360.0) + 360 : fmod(ang, 360.0));
   c.text(F_SM, px + 140, 190, b2, DIM);
   int y = 236;
   bool fr = frozen;
   c.fillCircle(px + 24, y - 5, 5, fr ? hex(0xE0A040) : (piOk ? PINK : FAINT));
-  c.text(F_SM, px + 38, y, fr ? "ESP завис (F: отпустить)" : (piOk ? "Pi на связи" : "Pi не подключена"), LIGHT);
-  snprintf(b2, sizeof b2, "строк: принято %ld, отправлено %ld", rxCount, txCount);
+  c.text(F_SM, px + 38, y, fr ? TR("ESP завис (F: отпустить)", "ESP frozen (F: release)") : (piOk ? TR("Pi на связи", "Pi connected") : TR("Pi не подключена", "no Pi")), LIGHT);
+  snprintf(b2, sizeof b2, TR("строк: принято %ld, отправлено %ld", "lines: %ld in, %ld out"), rxCount, txCount);
   c.text(F_SM, px + 18, y + 22, b2, DIM);
   c.line(px + 18, y + 38, px + pw - 18, y + 38, 1, LINE, 1);
   y += 62;
@@ -310,8 +312,8 @@ static void drawChrome(Canvas& c, int sx, int sy, int sw, int sh, Btn* b, int nb
       y += 19;
     }
   }
-  c.text(F_SM, px + 18, H - 62, "↑ ↓  Enter = OK   Esc = назад", DIM);
-  c.text(F_SM, px + 18, H - 40, "F = ESP завис   R = перезагрузка", DIM);
+  c.text(F_SM, px + 18, H - 62, TR("↑ ↓  Enter = OK   Esc = назад", "↑ ↓  Enter = OK   Esc = back"), DIM);
+  c.text(F_SM, px + 18, H - 40, TR("F = ESP завис   R = перезагрузка", "F = freeze ESP   R = reboot"), DIM);
   (void)t;
 }
 
@@ -346,12 +348,13 @@ int main(int argc, char** argv) {
     if (!strncmp(argv[i], "--size=", 7)) sscanf(argv[i] + 7, "%dx%d", &W, &H);
     else if (!strncmp(argv[i], "--scale=", 8)) scale = atoi(argv[i] + 8);
     else if (!strcmp(argv[i], "--headless")) headless = true;
+    else if (!strcmp(argv[i], "--lang=en")) { EN = true; S0.lang = 1; }
     else if (!strcmp(argv[i], "--inject") && i + 1 < argc) inject = argv[++i];
     else if (!strcmp(argv[i], "--link") && i + 1 < argc) link = argv[++i];
     else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
     else if (!strcmp(argv[i], "--shot-at") && i + 1 < argc) shotAt = atof(argv[++i]);
     else {
-      fprintf(stderr, "usage: virtual_esp [--size=320x170|240x240] [--scale=3] [--headless] [--inject FILE] [--link PATH]\n");
+      fprintf(stderr, "usage: virtual_esp [--size=320x170|240x240] [--scale=3] [--headless] [--lang=en] [--inject FILE] [--link PATH] [--shot FILE --shot-at S]\n");
       return 2;
     }
   }
@@ -396,9 +399,9 @@ int main(int argc, char** argv) {
   if (WH < 520) WH = 520;
   std::vector<uint16_t> cb(WW * WH);
   Canvas cc(WW, WH, cb.data());
-  Btn btn[3] = {{sx + sw / 2.f - 110, sy + sh + 60.f, 26, K_UP, "вверх", 0},
-                {sx + sw / 2.f, sy + sh + 60.f, 30, K_OK, "OK · держать = назад", 0},
-                {sx + sw / 2.f + 110, sy + sh + 60.f, 26, K_DOWN, "вниз", 0}};
+  Btn btn[3] = {{sx + sw / 2.f - 110, sy + sh + 60.f, 26, K_UP, TR("вверх", "up"), 0},
+                {sx + sw / 2.f, sy + sh + 60.f, 30, K_OK, TR("OK · держать = назад", "OK · hold = back"), 0},
+                {sx + sw / 2.f + 110, sy + sh + 60.f, 26, K_DOWN, TR("вниз", "down"), 0}};
 #ifndef NO_SDL
   SDL_Window* win = nullptr;
   SDL_Renderer* ren = nullptr;
