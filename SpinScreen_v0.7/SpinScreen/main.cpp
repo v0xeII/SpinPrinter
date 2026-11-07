@@ -29,6 +29,8 @@ struct Link {
   bool junk;  // this line had bytes no Pi sends (a floating wire): dropped
 };
 static Link links[2] = {{&Serial, {0}, 0, false}, {&Serial0, {0}, 0, false}};
+// PIN_PI_RX -1: the UART pins are used by something else (breadboard layout), USB only
+static const int NLINKS = PIN_PI_RX >= 0 ? 2 : 1;
 static volatile int active = -1;  // index into links, -1 = not known yet
 
 // one write() per line, so lines never interleave
@@ -36,7 +38,7 @@ static void sendLine(const char* line) {
   char b[160];
   int n = snprintf(b, sizeof b - 1, "%s\n", line);
   if (n > (int)sizeof b - 2) n = sizeof b - 2;
-  for (int i = 0; i < 2; i++)
+  for (int i = 0; i < NLINKS; i++)
     if (active < 0 || active == i) links[i].io->write((const uint8_t*)b, n);
 }
 // Lines from the UI go out through the serial task. A USB write can block for ~100 ms when the
@@ -89,6 +91,11 @@ static void handleLine(int k, const char* buf) {
     motor_zero();
     sendLine("ZEROED");
     return;
+  } else if (!strcmp(buf, "JOY")) {  // joystick state, for wiring checks
+    char out[200];
+    input_debug(out, sizeof out);
+    sendLine(out);
+    return;
   } else if (!strncmp(buf, "SETANGLE ", 9)) {
     motor_set_angle(atof(buf + 9));
     sendLine("ANGLE");
@@ -104,7 +111,7 @@ static void serialTask(void*) {
   for (;;) {
     Line out;
     while (xQueueReceive(txq, &out, 0) == pdTRUE) sendLine(out.s);
-    for (int k = 0; k < 2; k++) {
+    for (int k = 0; k < NLINKS; k++) {
       Link& L = links[k];
       while (L.io->available()) {
         uint8_t ch = (uint8_t)L.io->read();
@@ -127,8 +134,10 @@ static void serialTask(void*) {
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
+#if PIN_PI_RX >= 0
   Serial0.begin(SERIAL_BAUD, SERIAL_8N1, PIN_PI_RX, PIN_PI_TX);  // the three-wire link
   gpio_pullup_en((gpio_num_t)PIN_PI_RX);  // no wire on RX: idle high, not noise
+#endif
   prefs.begin("spinscreen", false);
   Settings s;
   s.rpm = prefs.getFloat("rpm", RPM_DEFAULT);

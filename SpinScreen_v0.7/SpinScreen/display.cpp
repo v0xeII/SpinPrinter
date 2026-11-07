@@ -6,7 +6,7 @@
 //  * pixels go out through small staging buffers, byte-swapped on the way, so drawing the next
 //    frame never waits for the SPI
 //  * only what changed goes over SPI (dirty.h), so a calm screen costs almost nothing
-//  * 170x320 and 240x240 panels (config.h)
+//  * 170x320, 240x240 and 240x320 panels (config.h)
 #ifdef ARDUINO
 #include "display.h"
 
@@ -134,6 +134,9 @@ bool display_init() {
 #if TFT_PANEL == PANEL_240x240
   static const uint8_t MAD[4] = {0x00, 0x60, 0xC0, 0xA0};
   static const int OX[4] = {0, 0, 0, 80}, OY[4] = {0, 0, 80, 0};
+#elif TFT_PANEL == PANEL_240x320
+  static const uint8_t MAD[4] = {0x00, 0x60, 0xC0, 0xA0};
+  static const int OX[4] = {0, 0, 0, 0}, OY[4] = {0, 0, 0, 0};  // fills the whole controller memory
 #else
   static const uint8_t MAD[4] = {0x00, 0x60, 0xC0, 0xA0};
   static const int OX[4] = {35, 0, 35, 0}, OY[4] = {0, 35, 0, 35};
