@@ -240,9 +240,12 @@ uint32_t display_push() {
   // Self-healing: one band of rows also goes out every frame, round the screen (all of it every
   // H / 8 frames: half a second on 320x240 at 60 fps). Only changes are sent otherwise, so a pixel
   // garbled on the wire (long or breadboard wires, a fast SPI clock) would stay on the panel
-  // until that spot changed again. Costs ~5 KB a frame, about 1 ms at 40 MHz.
+  // until that spot changed again. Costs ~5 KB a frame, about 1 ms at 40 MHz, so it rides only on
+  // light frames: a scroll or a page slide is not slowed down, the band goes on right after it.
   static int healY = 0;
-  if (!first && n < MAXRECTS) {
+  int px = 0;
+  for (int i = 0; i < n; i++) px += rects[i].w * rects[i].h;
+  if (!first && n < MAXRECTS && px < 8000) {
     int hh = H - healY < DIRTY_BAND ? H - healY : DIRTY_BAND;
     rects[n++] = {0, healY, W, hh};
     healY = healY + DIRTY_BAND >= H ? 0 : healY + DIRTY_BAND;

@@ -205,7 +205,7 @@ void loop() {
   workMs += ((t2 - t0) / 1000.f - workMs) * 0.05f;
   // 60 needs the work done in 16.7 ms. The way back to 60 is close enough that a page slide
   // (a short burst of heavy frames) does not leave a 320x240 screen stuck at 30 for good.
-  if (capFps == 60 && workMs > 15.5f) capFps = 30;
-  else if (capFps == 30 && workMs < 12.5f) capFps = 60;
+  if (capFps == 60 && workMs > 16.f) capFps = 30;
+  else if (capFps == 30 && workMs < 14.f) capFps = 60;
   ui_stats((t2 - t0) / 1000.f, bytes / 1024.f, (t1 - t0) / 1000.f);
 }
