@@ -58,10 +58,13 @@ TX and RX **cross**. Both boards are 3.3 V, no level shifter. The header is the 
 
 ## Printing from SpinSlicer over Wi-Fi
 
-In SpinSlicer, on the Print step, pick **"to printer"** → **"Send to printer"**. The video goes
-over **losslessly** together with the planned turns, and the print starts by itself (for now in the
-slicer's `printer` branch). You can also drop a video on the printer page (`http://spinslicer.local`)
-from any device on the same network, or bring it on a USB stick.
+In SpinSlicer, on the Print step, pick **"to printer"** → **"Send to printer"**. The slicer finds
+the printer on the network by itself (mDNS, `_spinprinter._tcp`), takes its profile (projector,
+vial, calibration) and sends one **`.spin`** file: the one-turn video, a picture of the part and
+the planned turns. You can also drop a `.spin` or a video on the printer page
+(`http://spinslicer.local`) from any device on the same network, or bring it on a USB stick.
+How the slicer and the printer work together: [docs/ecosystem.ru.md](docs/ecosystem.ru.md);
+the printer's API: [SpinPi/README.en.md](SpinPi/README.en.md#for-developers-http-api).
 
 ## What is here
 

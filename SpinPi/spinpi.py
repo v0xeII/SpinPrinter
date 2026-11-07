@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """SpinPi: the Raspberry Pi side of a SpinSlicer CAL printer.
 
-* web page on http://<pi>/ : drop a SpinSlicer video from a phone or PC, press Print
+* web page on http://<pi>/ : drop a SpinSlicer `.spin` file (or a plain video) from a phone or PC, press Print
+* SpinSlicer finds the printer by mDNS (_spinprinter._tcp), reads its profile (GET /api/printer),
+  uploads `.spin` files (PUT /api/files/<name>.spin) and reads the print log (GET /api/history)
 * USB stick: plug it into the Pi, its videos appear on the printer screen and the web page
 * the projector shows the frame that belongs to the vial's angle (SpinProj, C program): the ESP
   counts every motor step, SpinPi forwards the angle 20 times a second, SpinProj puts up the
@@ -24,6 +26,9 @@ import subprocess
 import threading
 import time
 import urllib.parse
+import uuid
+import zipfile
+from xml.sax.saxutils import escape as xml_escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -32,17 +37,30 @@ except ImportError:  # still serve the web page without the ESP
     serial = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 VIDEO_EXT = (".mp4", ".mkv", ".mov", ".avi", ".webm")
+SPIN_EXT = ".spin"  # SpinSlicer's one-file print: a stored ZIP with spin.json, video.mp4, preview.png
+PRINT_EXT = VIDEO_EXT + (SPIN_EXT,)
+SPIN_VERSION = 1  # the newest .spin version this SpinPi reads
+API_VERSION = 1
+ROTATIONS = ("ccw_from_top", "cw_from_top")
 
 
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
 
+def load_json(path, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
 def save_json(path, obj, **kw):
     """Write to a temp file, fsync, rename: the power can go at any moment and the old file stays whole."""
-    tmp = path + ".tmp"
+    tmp = f"{path}.{threading.get_ident()}.tmp"  # one per thread: two writers never share it
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, **kw)
         f.flush()
@@ -393,9 +411,12 @@ class AngleProjector:
     def show_image(self, path):
         self.send("IMAGE " + path)
 
-    def load(self, path, frames_per_turn, offset_px):
+    def load(self, path, frames_per_turn, offset_px, reverse=False, phase_deg=0.0):
+        """reverse: the video was made for the other turning direction; phase_deg: angle of frame 0."""
         self.drain()
         self.send(f"OFFSET {int(offset_px)}")
+        self.send(f"REVERSE {1 if reverse else 0}")
+        self.send(f"PHASE {float(phase_deg):.4f}")
         self.send(f"LOAD {int(frames_per_turn)} {path}")
 
     def angle(self, deg, rpm, t_ns, rtt_ns=0):
@@ -478,15 +499,137 @@ def pattern(root, name, w, h, offset=0, vial=400):
     return p
 
 
+# =============================================================================== .spin files
+class SpinError(ValueError):
+    """A .spin file that cannot be printed: the message is for the user (Russian, like the screen)."""
+
+
+def _num(v, positive=False):
+    ok = isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf")
+    return ok and (not positive or v > 0)
+
+
+def check_spin_meta(meta, names=None):
+    """Raise SpinError unless spin.json describes a print this SpinPi can do. Unknown fields are fine."""
+    if not isinstance(meta, dict) or meta.get("format") != "spin":
+        raise SpinError("это не файл .spin (нет format: spin)")
+    v = meta.get("version")
+    if not isinstance(v, int) or isinstance(v, bool) or v < 1:
+        raise SpinError("в spin.json нет версии формата")
+    if v > SPIN_VERSION:
+        raise SpinError(f"файл .spin версии {v}, этот SpinPi читает до {SPIN_VERSION}: обнови SpinPi")
+    video = meta.get("video")
+    if not isinstance(video, dict):
+        raise SpinError("в spin.json нет раздела video")
+    vf = video.get("file") or "video.mp4"
+    if not isinstance(vf, str) or (names is not None and vf not in names):
+        raise SpinError(f"в файле нет видео {vf}")
+    sha = video.get("sha256")
+    if sha is not None and not (isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{64}", sha)):
+        raise SpinError("video.sha256 не похож на SHA-256")
+    rot = video.get("rotation")
+    if rot is not None and rot not in ROTATIONS:
+        raise SpinError(f"непонятное направление вращения: {rot}")
+    for k in ("frames", "frames_per_rev", "width", "height"):
+        if video.get(k) is not None and not (isinstance(video[k], int) and not isinstance(video[k], bool) and video[k] > 0):
+            raise SpinError(f"video.{k} должно быть целым > 0")
+    if video.get("fps") is not None and not _num(video["fps"], positive=True):
+        raise SpinError("video.fps должно быть > 0")
+    if video.get("frame0_angle_deg") is not None and not _num(video["frame0_angle_deg"]):
+        raise SpinError("video.frame0_angle_deg должно быть числом")
+    plan = meta.get("plan")
+    if plan is not None:
+        if not isinstance(plan, dict):
+            raise SpinError("plan должен быть объектом")
+        for k in ("revolutions", "tolerance_pct", "revolution_s", "print_time_s", "rpm"):
+            if plan.get(k) is not None and not _num(plan[k], positive=k != "tolerance_pct"):
+                raise SpinError(f"plan.{k} должно быть числом > 0")
+    return meta
+
+
+def read_spin(path):
+    """spin.json of a .spin file, checked. Raises SpinError."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+            if "spin.json" not in names:
+                raise SpinError("в файле нет spin.json")
+            try:
+                meta = json.loads(z.read("spin.json").decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                raise SpinError("spin.json не читается (это не JSON)") from None
+            return check_spin_meta(meta, names)
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError, EOFError, RuntimeError, NotImplementedError) as e:
+        raise SpinError(f"файл .spin повреждён ({e})") from None
+
+
+def extract_spin(path, dst):
+    """Unpack video.mp4 (and preview.png, slicer.json) of a .spin into the folder dst, checking the
+    video's SHA-256 on the way. Returns spin.json. Raises SpinError; a half-written folder is removed."""
+    meta = read_spin(path)
+    os.makedirs(dst, exist_ok=True)
+    vf = meta["video"].get("file") or "video.mp4"
+    want = (meta["video"].get("sha256") or "").lower()
+    out = os.path.join(dst, "video.mp4")
+    try:
+        with zipfile.ZipFile(path) as z:
+            h = hashlib.sha256()
+            with z.open(vf) as src, open(out + ".part", "wb") as f:
+                while True:
+                    chunk = src.read(1 << 20)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+                    f.write(chunk)
+            if want and h.hexdigest() != want:
+                os.unlink(out + ".part")
+                raise SpinError("видео в .spin повреждено: SHA-256 не совпадает (перепиши файл)")
+            os.replace(out + ".part", out)
+            names = z.namelist()
+            for extra in ("preview.png", "slicer.json"):
+                if extra in names and z.getinfo(extra).file_size < 8 << 20:
+                    data = z.read(extra)
+                    if extra == "preview.png" and not data.startswith(b"\x89PNG\r\n\x1a\n"):
+                        continue
+                    with open(os.path.join(dst, extra), "wb") as f:
+                        f.write(data)
+    except (zipfile.BadZipFile, OSError, EOFError, RuntimeError, NotImplementedError) as e:
+        for n in ("video.mp4.part",):
+            try:
+                os.unlink(os.path.join(dst, n))
+            except OSError:
+                pass
+        raise SpinError(f"файл .spin повреждён ({e})") from None
+    return meta
+
+
+def spin_plan(meta):
+    """spin.json -> the flat plan SpinPi already knows from the MP4 tag and <name>.spin.json."""
+    v = meta.get("video") or {}
+    plan = dict(meta.get("plan") or {})
+    plan["format"] = "spin"
+    plan["version"] = meta.get("version")
+    for k in ("frames", "fps", "width", "height", "frames_per_rev", "rotation", "frame0_angle_deg", "sha256"):
+        if v.get(k) is not None:
+            plan[k] = v[k]
+    for k in ("name", "generator", "created", "resin"):
+        if meta.get(k) is not None:
+            plan[k] = meta[k]
+    pr = meta.get("printer")
+    if isinstance(pr, dict) and pr.get("profile_id"):
+        plan["printer_profile_id"] = pr["profile_id"]
+    return plan
+
+
 # =============================================================================== library
-SAFE = re.compile(r"[^A-Za-z0-9._()\- Ѐ-ӿ]+")
+SAFE =re.compile(r"[^A-Za-z0-9._()\- Ѐ-ӿ]+")
 RPM_IN_NAME = re.compile(r"_(\d+(?:\.\d+)?)rpm", re.IGNORECASE)  # OpenCAL convention: part_9rpm.mp4
 
 
 def safe_name(name):
     name = os.path.basename(urllib.parse.unquote(name)).strip()
     name = SAFE.sub("_", name)[:120]
-    if not name.lower().endswith(VIDEO_EXT):
+    if not name.lower().endswith(PRINT_EXT):
         name += ".mp4"
     return name
 
@@ -517,18 +660,20 @@ def probe(path):
 
 
 class Library:
-    """Videos uploaded over Wi-Fi ("lib/<name>") + videos on USB sticks ("usb/<stick>/<path>")."""
+    """Prints uploaded over Wi-Fi ("lib/<name>") + prints on USB sticks ("usb/<stick>/<path>").
+
+    A print is a plain video or a .spin file. The video inside a .spin is unpacked once into
+    spin/<hash>/ (SpinProj and ffprobe need a plain file), also for .spin files on a USB stick."""
 
     def __init__(self, root, usb_dirs_fn):
         self.root = os.path.join(root, "prints")
         self.thumbs = os.path.join(root, "thumbs")
+        self.spin_root = os.path.join(root, "spin")
         os.makedirs(self.root, exist_ok=True)
         os.makedirs(self.thumbs, exist_ok=True)
+        os.makedirs(self.spin_root, exist_ok=True)
         self.meta_path = os.path.join(root, "library.json")
-        try:
-            self.meta = json.load(open(self.meta_path))
-        except (OSError, ValueError):
-            self.meta = {}
+        self.meta = load_json(self.meta_path, {})
         self.usb_dirs_fn = usb_dirs_fn
         self.lock = threading.Lock()
 
@@ -541,21 +686,74 @@ class Library:
     def thumb_path(self, fid):
         return os.path.join(self.thumbs, hashlib.sha1(fid.encode()).hexdigest()[:16] + ".jpg")
 
+    def thumb_file(self, fid):
+        """(path, content type): the .spin preview (PNG) or a frame grabbed by ffmpeg (JPEG)."""
+        jpg = self.thumb_path(fid)
+        png = jpg[:-4] + ".png"
+        return (png, "image/png") if os.path.exists(png) else (jpg, "image/jpeg")
+
+    def spin_dir(self, fid):
+        return os.path.join(self.spin_root, hashlib.sha1(fid.encode()).hexdigest()[:16])
+
+    @staticmethod
+    def _thumb_from_video(video, out):
+        try:
+            subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-i", video, "-vf", "scale=320:-2", "-frames:v", "1", out],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:  # no ffmpeg (a PC test): no picture
+            pass
+
+    def _spin_info(self, fid, path):
+        """Unpack and check a .spin; metadata from spin.json (ffprobe only for what it leaves out)."""
+        d = self.spin_dir(fid)
+        try:
+            meta = extract_spin(path, d)
+        except SpinError as e:
+            log("bad .spin", path, e)
+            return {"error": str(e), "format": "spin"}
+        video = os.path.join(d, "video.mp4")
+        plan = spin_plan(meta)
+        v = meta["video"]
+        info = {k: v[k] for k in ("frames", "fps", "width", "height") if v.get(k) is not None}
+        if len(info) < 4:
+            info = dict(probe(video) or {}, **info)
+            info.pop("plan", None)
+        info.update(plan=plan, video=video, format="spin", title=meta.get("name"))
+        thumb = self.thumb_path(fid)
+        png = thumb[:-4] + ".png"
+        preview = os.path.join(d, "preview.png")
+        for p in (png, thumb):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        if os.path.exists(preview):
+            with open(preview, "rb") as src, open(png, "wb") as dst:
+                dst.write(src.read())
+            info["preview"] = True
+        else:
+            self._thumb_from_video(video, thumb)
+        return info
+
     def _info(self, fid, path):
-        """Cached metadata; re-probed when the file changes."""
+        """Cached metadata; re-probed (a .spin: unpacked again) when the file changes."""
         st = os.stat(path)
         key = f"{st.st_size}:{int(st.st_mtime)}"
         with self.lock:
             m = self.meta.get(fid)
+        if m is not None and m.get("video") and not os.path.exists(m["video"]):
+            m = None  # the unpacked video is gone: unpack again
         if m is None or m.get("key") != key:
-            info = probe(path) or {}
-            old = m or {}
+            if path.lower().endswith(SPIN_EXT):
+                info = self._spin_info(fid, path)
+            else:
+                info = probe(path) or {}
+                self._thumb_from_video(path, self.thumb_path(fid))
+            old = m or self.meta.get(fid) or {}
             m = dict(info, key=key, size=st.st_size, added=old.get("added", time.time()), revs=old.get("revs"))
             with self.lock:
                 self.meta[fid] = m
                 self._save()
-            subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-i", path, "-vf", "scale=320:-2", "-frames:v", "1",
-                              self.thumb_path(fid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return m
 
     @staticmethod
@@ -563,7 +761,8 @@ class Library:
         """SpinSlicer writes <name>.spin.json beside the video (the same plan as the MP4 tag)."""
         p = os.path.splitext(path)[0] + ".spin.json"
         try:
-            plan = json.load(open(p, encoding="utf-8"))
+            with open(p, encoding="utf-8") as f:
+                plan = json.load(f)
             return plan if isinstance(plan, dict) else None
         except (OSError, ValueError):
             return None
@@ -571,19 +770,34 @@ class Library:
     def _entry(self, fid, path, source):
         m = self._info(fid, path)
         name = os.path.basename(path)
-        d = {k: v for k, v in m.items() if k != "key"}
+        d = {k: v for k, v in m.items() if k not in ("key", "video")}
         d.update(id=fid, name=name, source=source)
-        plan = self._sidecar(path) or m.get("plan")
+        d.setdefault("format", "video")
+        plan = m.get("plan") if d["format"] == "spin" else (self._sidecar(path) or m.get("plan"))
         d["plan"] = plan
-        if plan and plan.get("revolutions"):
+        plan = plan if isinstance(plan, dict) else {}
+        if _num(plan.get("revolutions"), positive=True):
             d["plan_revs"] = float(plan["revolutions"])
-            d["tolerance_pct"] = float(plan.get("tolerance_pct") or 0) or None
+            d["tolerance_pct"] = float(plan["tolerance_pct"]) if _num(plan.get("tolerance_pct"), True) else None
+        # how the frames sit on the vial's angle (SpinSlicer writes these; old videos: one turn, unknown way)
+        rot = plan.get("rotation")
+        d["rotation"] = rot if rot in ROTATIONS else None
+        d["frame0_angle_deg"] = float(plan["frame0_angle_deg"]) if _num(plan.get("frame0_angle_deg")) else 0.0
+        fpr = plan.get("frames_per_rev")
+        fpr = int(fpr) if _num(fpr, positive=True) else None
+        d["frames_per_rev"] = fpr
+        w = plan.get("warnings")
+        d["warnings"] = [str(x) for x in w if x] if isinstance(w, list) else []
+        d["resin"] = plan.get("resin") if isinstance(plan.get("resin"), dict) else None
+        d["printer_profile_id"] = plan.get("printer_profile_id")
         if m.get("frames") and m.get("fps"):
             dur = m["frames"] / m["fps"]
             hint = RPM_IN_NAME.search(name)
             if m.get("revs"):  # set by hand on the web page
                 rev_s = dur / m["revs"]
-            elif hint:  # OpenCAL-style file name
+            elif fpr:  # the slicer says how many frames make one turn
+                rev_s = fpr / m["fps"]
+            elif hint and d["format"] != "spin":  # OpenCAL-style file name
                 rev_s = 60.0 / float(hint.group(1))
             else:  # SpinSlicer: one video = one turn
                 rev_s = dur
@@ -601,7 +815,7 @@ class Library:
                 if dirpath.count(os.sep) - mount.count(os.sep) > 2:
                     dirs[:] = []
                 for n in sorted(names):
-                    if n.lower().endswith(VIDEO_EXT) and not n.startswith(".") and "recording" not in n.lower():
+                    if n.lower().endswith(PRINT_EXT) and not n.startswith(".") and "recording" not in n.lower():
                         p = os.path.join(dirpath, n)
                         rel = os.path.relpath(p, mount)
                         try:
@@ -617,9 +831,13 @@ class Library:
         return out + lib
 
     def resolve(self, fid):
-        """id -> (entry, path) or (None, None)"""
+        """id -> (entry, path of the video to play) or (None, None). A .spin plays its unpacked video."""
         for f in self.list():
             if f["id"] == fid:
+                if f.get("format") == "spin":
+                    with self.lock:
+                        m = self.meta.get(fid) or {}
+                    return f, m.get("video")
                 if fid.startswith("lib/"):
                     return f, self.lib_path(fid[4:])
                 _, label, rel = fid.split("/", 2)
@@ -634,15 +852,30 @@ class Library:
     def remove(self, fid):
         if not fid.startswith("lib/"):
             return False
-        for p in (self.lib_path(fid[4:]), self.thumb_path(fid)):
+        for p in (self.lib_path(fid[4:]), self.thumb_path(fid), self.thumb_path(fid)[:-4] + ".png"):
             try:
                 os.unlink(p)
             except FileNotFoundError:
                 pass
+        d = self.spin_dir(fid)
+        for n in ("video.mp4", "video.mp4.part", "preview.png", "slicer.json"):
+            try:
+                os.unlink(os.path.join(d, n))
+            except FileNotFoundError:
+                pass
+        try:
+            os.rmdir(d)
+        except OSError:
+            pass
         with self.lock:
             self.meta.pop(fid, None)
             self._save()
         return True
+
+    def forget(self, fid):
+        with self.lock:
+            if self.meta.pop(fid, None) is not None:
+                self._save()
 
     def set_revs(self, fid, revs):
         with self.lock:
@@ -746,6 +979,21 @@ class PrintError(Exception):
     pass
 
 
+# The printer profile (GET /api/printer): what SpinSlicer needs for its maths, edited on the web
+# page. key in settings["profile"] -> (kind, min, max); None = not known yet (the slicer keeps its own)
+PROFILE_FIELDS = {
+    "irradiance_mw_cm2": (float, 0.0, 1000.0),  # projector, on the axis, at full white
+    "contrast": (float, 1.0, 1e7),
+    "vial_diameter_mm": (float, 1.0, 500.0),
+    "vial_wall_mm": (float, 0.0, 50.0),
+    "vial_n": (float, 1.0, 3.0),  # refractive index of the vial glass
+    "motor_gear": (float, 0.01, 1000.0),
+    "motor_dir": (str, None, None),  # ccw_from_top | cw_from_top: how the vial really turns
+}
+PROFILE_DEFAULTS = {"irradiance_mw_cm2": None, "contrast": None, "vial_diameter_mm": None, "vial_wall_mm": None,
+                    "vial_n": None, "motor_gear": 1.0, "motor_dir": "ccw_from_top"}
+
+
 class Printer:
     """Exposure = a whole number of turns, ended exactly on the turn boundary.
 
@@ -758,19 +1006,25 @@ class Printer:
         self.esp, self.proj, self.lib, self.warm = esp, proj, lib, warm
         self.data, self.pw, self.ph = data, proj_w, proj_h
         self.settings_path = os.path.join(data, "settings.json")
+        self.save_lock = threading.RLock()
         self.history_path = os.path.join(data, "history.json")
-        try:
-            self.settings = json.load(open(self.settings_path))
-        except (OSError, ValueError):
-            self.settings = {}
+        self.settings = load_json(self.settings_path, {})
         defaults = {"factor": 1.0, "delay_s": 3, "default_revs": 5, "warmup_min": 5, "last_id": "",
                     "offset_px": 0, "vial_px": 400, "display_fps": 60.0}
         for k, v in defaults.items():
             self.settings.setdefault(k, v)
-        try:
-            self.history = json.load(open(self.history_path))
-        except (OSError, ValueError):
-            self.history = []
+        prof = self.settings.get("profile")
+        prof = prof if isinstance(prof, dict) else {}
+        for k, v in PROFILE_DEFAULTS.items():
+            prof.setdefault(k, v)
+        self.settings["profile"] = prof
+        if not self.settings.get("printer_id"):  # made once, stays for the life of the SD card
+            self.settings["printer_id"] = "spinpi-" + uuid.uuid4().hex[:8]
+            self.save_settings()
+        self.settings.setdefault("printer_name", "")
+        self.settings.setdefault("prints", 0)
+        self.history = load_json(self.history_path, [])
+        self.on_profile = None  # called after the profile changes (mDNS name)
         self.state = "idle"  # idle | wait | print | done | error
         self.wait = None  # (seconds, kind) while waiting before the light
         self.job = None
@@ -787,11 +1041,13 @@ class Printer:
 
     # ---- persistence
     def save_settings(self):
-        save_json(self.settings_path, self.settings, indent=1)
+        with self.save_lock:  # the print thread and a web request may save at the same moment
+            save_json(self.settings_path, self.settings, indent=1)
 
     def save_history(self):
-        self.history = self.history[-200:]
-        save_json(self.history_path, self.history, indent=1, ensure_ascii=False)
+        with self.save_lock:
+            self.history = self.history[-200:]
+            save_json(self.history_path, self.history, indent=1, ensure_ascii=False)
 
     def busy(self):
         return self.state in ("wait", "print")
@@ -811,10 +1067,81 @@ class Printer:
             revs = max(1, round(plan * factor)) if plan else int(self.settings["default_revs"])
         revs = max(1, int(revs))
         d = {"revs": revs, "time_s": revs * f["rev_s"], "factor": factor, "plan_revs": plan,
-             "tolerance_pct": f.get("tolerance_pct"), "cadence_ok": self.cadence_ok(f.get("fps", 0))}
+             "tolerance_pct": f.get("tolerance_pct"), "cadence_ok": self.cadence_ok(f.get("fps", 0)),
+             "reversed": self.reversed(f), "other_printer": self.other_printer(f), "warnings": f.get("warnings") or []}
         if plan:
             d["dose_dev_pct"] = 100.0 * (revs / (plan * factor) - 1.0)
         return d
+
+    # ---- how the video's frames sit on the vial
+    @property
+    def motor_dir(self):
+        d = self.settings["profile"].get("motor_dir")
+        return d if d in ROTATIONS else "ccw_from_top"
+
+    def reversed(self, f):
+        """The slicer made the frames for the other turning direction: play them backwards."""
+        return bool(f.get("rotation")) and f["rotation"] != self.motor_dir
+
+    def other_printer(self, f):
+        pid = f.get("printer_profile_id")
+        return bool(pid) and pid != self.settings["printer_id"]
+
+    def annotate(self, files):
+        for f in files:
+            f["reversed"] = self.reversed(f)
+            f["other_printer"] = self.other_printer(f)
+        return files
+
+    # ---- the printer profile for SpinSlicer
+    def profile(self):
+        s, p = self.settings, self.settings["profile"]
+        hz = getattr(self.proj, "hz", None) or s.get("display_fps")
+        return {
+            "api": API_VERSION, "spin_version": SPIN_VERSION,
+            "id": s["printer_id"], "name": s.get("printer_name") or socket.gethostname(),
+            "projector": {"width": self.pw, "height": self.ph, "hz": hz,
+                          "irradiance_mw_cm2": p.get("irradiance_mw_cm2"), "contrast": p.get("contrast")},
+            "vial": {"diameter_mm": p.get("vial_diameter_mm"), "wall_mm": p.get("vial_wall_mm"),
+                     "n_glass": p.get("vial_n")},
+            "calibration": {"offset_px": s["offset_px"], "center_offset_px": [s["offset_px"], 0],
+                            "vial_width_px": s["vial_px"]},
+            "motor": {"gear": p.get("motor_gear"), "direction": self.motor_dir},
+            "exposure": {"factor": s["factor"]},
+            "software": {"spinpi": VERSION, "spinscreen": self.esp.version or None,
+                         "engine": "angle" if self.angle_mode else "mpv"},
+        }
+
+    def set_profile(self, b):
+        """Edit from the web page: {"name": …, "irradiance_mw_cm2": …, …}; empty / null = not known."""
+        if not isinstance(b, dict):
+            return "нужен JSON-объект"
+        if "name" in b:
+            self.settings["printer_name"] = SAFE.sub(" ", str(b["name"] or "")).strip()[:40]
+        prof = dict(self.settings["profile"])
+        for k, (kind, lo, hi) in PROFILE_FIELDS.items():
+            if k not in b:
+                continue
+            v = b[k]
+            if kind is str:
+                if v not in ROTATIONS:
+                    return f"{k}: {' / '.join(ROTATIONS)}"
+                prof[k] = v
+            elif v is None or v == "":
+                prof[k] = PROFILE_DEFAULTS[k]
+            else:
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    return f"{k}: нужно число"
+                if not (lo <= v <= hi):
+                    return f"{k}: от {lo:g} до {hi:g}"
+                prof[k] = v
+        self.settings["profile"] = prof
+        self.save_settings()
+        if self.on_profile:
+            self.on_profile()
+        return None
 
     def status(self):
         j = self.job
@@ -827,7 +1154,7 @@ class Printer:
              "history": self.history[-8:], "version": VERSION,
              "engine": "angle" if self.angle_mode else "mpv"}
         if j:
-            d["job"] = {k: j[k] for k in ("id", "file", "rpm", "revs", "time_s", "factor", "plan_revs")}
+            d["job"] = {k: j.get(k) for k in ("id", "file", "rpm", "revs", "time_s", "factor", "plan_revs", "reversed")}
             d["job"].update(turn=j.get("turn", 0), left_s=j.get("left_s", j["time_s"]),
                             progress=j.get("progress", 0.0))
         return d
@@ -837,18 +1164,24 @@ class Printer:
         if self.busy():
             return "busy"
         f, path = self.lib.resolve(fid)
-        if not f or not f.get("rpm"):
+        if f and f.get("error"):
+            return f["error"]
+        if not f or not f.get("rpm") or not path:
             return "no such video"
         if self.warm.connected is False:
             return "projector not connected (HDMI)"
         p = self.plan_for(f, revs, factor)
+        if p["reversed"] and not self.angle_mode:
+            return "видео для другого направления вращения: нужен движок angle (SpinProj)"
         delay_s = float(self.settings["delay_s"] if delay_s is None else delay_s)
         self.settings.update(factor=p["factor"], delay_s=delay_s, last_id=fid)
         if not f.get("plan_revs"):
             self.settings["default_revs"] = p["revs"]
         self.save_settings()
         self.job = dict(p, id=fid, file=f["name"], path=path, rpm=f["rpm"], rev_s=f["rev_s"], fps=f.get("fps"),
-                        delay_s=delay_s)
+                        delay_s=delay_s, frames_per_rev=f.get("frames_per_rev"), phase=f.get("frame0_angle_deg") or 0.0,
+                        format=f.get("format", "video"), plan=f.get("plan") if isinstance(f.get("plan"), dict) else None,
+                        resin=f.get("resin"), printer_profile_id=f.get("printer_profile_id"))
         self.stop_flag.clear()
         threading.Thread(target=self._run_angle if self.angle_mode else self._run, daemon=True).start()
         return None
@@ -864,12 +1197,30 @@ class Printer:
         self.esp.send(f"SPIN {1 if on else 0}")
         return None
 
+    def history_entry(self, j, engine):
+        """One line of the print log: also what SpinSlicer reads back (GET /api/history) to tune the resin."""
+        self.settings["prints"] = int(self.settings.get("prints") or 0) + 1
+        plan = j.get("plan") or {}
+        keep = ("revolutions", "tolerance_pct", "revolution_s", "print_time_s", "rpm", "exposure_factor", "brightness",
+                "generator", "created", "sha256")
+        return {"n": self.settings["prints"], "t": time.strftime("%Y-%m-%d %H:%M"),
+                "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "id": j["id"], "file": j["file"], "format": j.get("format", "video"),
+                "revs": j["revs"], "time_s": j["time_s"], "rpm": j["rpm"],
+                "factor": j["factor"], "exposure_pct": round(100 * (j["factor"] - 1), 2),
+                "plan_revs": j["plan_revs"], "tolerance_pct": j["tolerance_pct"],
+                "plan": {k: plan[k] for k in keep if plan.get(k) is not None} or None,
+                "resin": j.get("resin"), "printer_profile_id": j.get("printer_profile_id"),
+                "printer_id": self.settings["printer_id"], "reversed": j.get("reversed", False),
+                "frame0_angle_deg": j.get("phase", 0.0), "engine": engine, "result": None}
+
     def result(self, verdict):
         """Feedback after a print: under / ok / over. Moves the exposure factor for next time."""
         if not self.history or verdict not in ("under", "ok", "over"):
             return None
         h = self.history[-1]
         h["result"] = verdict
+        h["factor_after"] = None  # filled below: the correction the next print will start from
         tol = h.get("tolerance_pct") or 5.0
         step = min(0.15, max(0.02, tol / 100.0))
         if verdict == "under":
@@ -877,6 +1228,7 @@ class Printer:
         elif verdict == "over":
             self.settings["factor"] *= 1 - step
         self.settings["factor"] = round(max(0.3, min(3.0, self.settings["factor"])), 4)
+        h["factor_after"] = self.settings["factor"]
         self.save_settings()
         self.save_history()
         pct = 100 * (self.settings["factor"] - 1)
@@ -906,7 +1258,7 @@ class Printer:
             self.show_pattern(self.pattern)
 
     def send_list(self):
-        files = [f for f in self.lib.list() if f.get("rpm")][:16]
+        files = [f for f in self.lib.list() if f.get("rpm") and not f.get("error")][:16]
         self.esp_list = [f["id"] for f in files]
         s, e = self.settings, self.esp
         e.send(f"FL BEGIN {len(files)} {100 * (s['factor'] - 1):.0f} {s['delay_s']:.0f} {int(s['default_revs'])}")
@@ -972,9 +1324,7 @@ class Printer:
     def _run(self):
         j = self.job
         e = self.esp
-        entry = {"t": time.strftime("%Y-%m-%d %H:%M"), "file": j["file"], "revs": j["revs"], "time_s": j["time_s"],
-                 "factor": j["factor"], "plan_revs": j["plan_revs"], "tolerance_pct": j["tolerance_pct"],
-                 "result": None}
+        entry = self.history_entry(j, "mpv")
         try:
             self.state, self.msg, self.sync_ms, self.drops, self.pattern = "wait", "", None, 0, "black"
             self.proj.black()
@@ -1010,9 +1360,11 @@ class Printer:
                 time.sleep(0.05)
             else:
                 raise PrintError("видео не запустилось")
-            # the vial angle := where the video is right now, so they start in phase
-            j["angle0"] = (tpos % j["rev_s"]) / j["rev_s"] * 360.0
+            # the vial angle := where the video is right now (frame 0 sits at frame0_angle_deg), so they
+            # start in phase
+            j["angle0"] = ((tpos % j["rev_s"]) / j["rev_s"] * 360.0 + j.get("phase", 0.0)) % 360.0
             e.send(f"SETANGLE {j['angle0']:.4f}")
+            entry["angle0"] = round(j["angle0"], 4)
             dfps = self.proj.get("display-fps")
             if dfps:
                 self.settings["display_fps"] = round(float(dfps), 3)
@@ -1063,16 +1415,17 @@ class Printer:
     def _run_angle(self):
         j = self.job
         e, pr = self.esp, self.proj
-        entry = {"t": time.strftime("%Y-%m-%d %H:%M"), "file": j["file"], "revs": j["revs"], "time_s": j["time_s"],
-                 "factor": j["factor"], "plan_revs": j["plan_revs"], "tolerance_pct": j["tolerance_pct"],
-                 "result": None, "engine": "angle"}
+        entry = self.history_entry(j, "angle")
         done = threading.Event()
         try:
             self.state, self.msg, self.sync_ms, self.drops, self.pattern = "wait", "", None, 0, "black"
             self.last_pos = None
             pr.black()
-            frames = max(1, round(j["rev_s"] * (j.get("fps") or 0)))
-            pr.load(j["path"], frames, self.settings["offset_px"])  # unpacks while the motor spins up
+            frames = j.get("frames_per_rev") or max(1, round(j["rev_s"] * (j.get("fps") or 0)))
+            if j.get("reversed"):
+                log("the video turns the other way than the motor: frames go backwards")
+            # unpacks while the motor spins up
+            pr.load(j["path"], frames, self.settings["offset_px"], reverse=j.get("reversed"), phase_deg=j.get("phase", 0.0))
             threading.Thread(target=self._feed_angles, args=(done,), daemon=True).start()
             e.send("FILE " + j["file"].encode("utf-8")[:60].decode("utf-8", "ignore"))
             e.send(f"TURNS {j['revs']}")
@@ -1124,6 +1477,11 @@ class Printer:
                 w, rest = self._proj_event(0.1)
             if w != "LIGHT":
                 raise PrintError("проектор не включил свет: " + (rest or "нет ответа")[:50])
+            try:
+                j["angle0"] = float(rest.split()[0])  # the angle the light came on at
+                entry["angle0"] = round(j["angle0"], 4)
+            except (ValueError, IndexError):
+                pass
             self.state = "print"
             if pr.hz:
                 self.settings["display_fps"] = round(pr.hz, 3)
@@ -1297,6 +1655,65 @@ def wifi_name():
     return ""
 
 
+# =============================================================================== mDNS (avahi)
+AVAHI_DIR = "/etc/avahi/services"
+
+
+def avahi_service(name, printer_id, port):
+    """avahi static service: SpinSlicer browses _spinprinter._tcp and shows TXT name / id."""
+    txt = "".join(f"\n    <txt-record>{xml_escape(t)}</txt-record>" for t in
+                  (f"name={name}", f"id={printer_id}", f"api={API_VERSION}", "path=/api/printer"))
+    return ("<?xml version=\"1.0\" standalone='no'?>\n"
+            "<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">\n"
+            "<!-- written by SpinPi (spinpi.py) on every start: edits here are lost -->\n"
+            "<service-group>\n"
+            f"  <name replace-wildcards=\"yes\">{xml_escape(name)}</name>\n"
+            "  <service>\n"
+            "    <type>_spinprinter._tcp</type>\n"
+            f"    <port>{int(port)}</port>{txt}\n"
+            "  </service>\n"
+            "</service-group>\n")
+
+
+class Mdns:
+    """Keeps /etc/avahi/services/spinprinter.service in step with the printer's name and id.
+    avahi-daemon notices the change by itself; nothing happens where there is no avahi (a PC)."""
+
+    def __init__(self, port, folder=AVAHI_DIR):
+        self.port, self.folder = port, folder
+        self.text = None
+        self.warned = False
+
+    def publish(self, name, printer_id):
+        text = avahi_service(name, printer_id, self.port)
+        if text == self.text or not self.folder or not os.path.isdir(os.path.dirname(self.folder.rstrip("/")) or "/"):
+            return False
+        path = os.path.join(self.folder, "spinprinter.service")
+        try:
+            os.makedirs(os.path.realpath(self.folder), exist_ok=True)  # SpinOS: a link into /run
+            try:
+                with open(path, encoding="utf-8") as f:
+                    same = f.read() == text
+            except OSError:
+                same = False
+            if not same:
+                with open(path + ".tmp", "w", encoding="utf-8") as f:
+                    f.write(text)
+                os.replace(path + ".tmp", path)
+                log("mDNS: _spinprinter._tcp", repr(name), printer_id, "port", self.port)
+                try:
+                    subprocess.run(["avahi-daemon", "--reload"], capture_output=True, timeout=5)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+        except OSError as e:
+            if not self.warned:
+                log("mDNS: cannot write", path, e)
+                self.warned = True
+            return False
+        self.text = text
+        return True
+
+
 # =============================================================================== Wi-Fi (SpinOS)
 class Net:
     """Home Wi-Fi or the printer's own access point. The work is done by the SpinOS script
@@ -1364,7 +1781,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _file(self, path, ctype):
         try:
-            data = open(path, "rb").read()
+            with open(path, "rb") as f:
+                data = f.read()
         except OSError:
             return self._json({"error": "not found"}, 404)
         self.send_response(200)
@@ -1391,9 +1809,15 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/state":
             return self._json(a.printer.status())
         if u.path == "/api/files":
-            return self._json(a.lib.list())
+            return self._json(a.printer.annotate(a.lib.list()))
         if u.path == "/api/thumb":
-            return self._file(a.lib.thumb_path(q.get("id", [""])[0]), "image/jpeg")
+            return self._file(*a.lib.thumb_file(q.get("id", [""])[0]))
+        if u.path == "/api/printer":  # the printer profile for SpinSlicer
+            return self._json(a.printer.profile())
+        if u.path == "/api/history":  # every print with its plan, correction and "how did it come out"
+            p = a.printer
+            return self._json({"api": API_VERSION, "printer_id": p.settings["printer_id"],
+                               "factor": p.settings["factor"], "prints": p.history})
         if u.path == "/api/wifi":
             return self._json(dict(a.net.status(), networks=a.net.scan() if q.get("scan") else []))
         if u.path == "/api/events":  # Server-Sent Events: live state twice a second
@@ -1417,7 +1841,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json({"error": "not found"}, 404)
 
-    def do_PUT(self):  # upload: PUT /api/files/<name>, body = the video
+    def do_PUT(self):  # upload: PUT /api/files/<name>, body = the video or the .spin file
         a = self.app
         u = urllib.parse.urlparse(self.path)
         if not u.path.startswith("/api/files/"):
@@ -1440,11 +1864,24 @@ class Handler(BaseHTTPRequestHandler):
             os.fsync(f.fileno())
         if left:
             os.unlink(tmp)
-            return self._json({"error": "upload interrupted"}, 400)
+            return self._json({"ok": False, "error": "upload interrupted"}, 400)
+        spin = name.lower().endswith(SPIN_EXT)
+        if spin:
+            try:
+                read_spin(tmp)
+            except SpinError as e:
+                os.unlink(tmp)
+                log("rejected", name, e)
+                return self._json({"ok": False, "error": str(e)}, 400)
         os.replace(tmp, dst)
+        a.lib.forget("lib/" + name)  # a new file under an old name: unpack it again
         info = a.lib.added(name)
+        if info.get("error"):  # e.g. the video's SHA-256 does not match
+            a.lib.remove("lib/" + name)
+            log("rejected", name, info["error"])
+            return self._json({"ok": False, "error": info["error"]}, 400)
         log("uploaded", name)
-        self._json({"ok": True, "name": name, "info": info})
+        self._json({"ok": True, "name": name, "info": a.printer.annotate([info])[0]})
 
     def do_DELETE(self):
         u = urllib.parse.urlparse(self.path)
@@ -1476,6 +1913,9 @@ class Handler(BaseHTTPRequestHandler):
                     p.settings[k] = max(0.0, min(60.0, float(b[k])))
             p.save_settings()
             return self._json({"ok": True, "settings": p.settings})
+        if u.path == "/api/printer":
+            err = p.set_profile(b)
+            return self._json({"ok": err is None, "error": err, "printer": p.profile()}, 200 if err is None else 400)
         if u.path == "/api/stop":
             p.stop()
             return self._json({"ok": True})
@@ -1520,6 +1960,7 @@ def main():
     ap.add_argument("--spinproj-arg", action="append", default=[], help="extra spinproj option, e.g. --spinproj-arg=--rt")
     ap.add_argument("--hdmi", default="watch", choices=["watch", "ignore"],
                     help="ignore: do not look at the HDMI connector (tests on a PC)")
+    ap.add_argument("--avahi-dir", default=AVAHI_DIR, help="where to put the mDNS service file ('' = do not)")
     args = ap.parse_args()
     os.makedirs(args.data, exist_ok=True)
     pw, ph = (1280, 800) if args.projector == "auto" else (int(v) for v in args.projector.lower().split("x"))
@@ -1542,6 +1983,13 @@ def main():
     app.printer = Printer(app.esp, app.proj, app.lib, args.data, pw, ph, app.warm)
     ref["p"] = app.printer
     threading.Thread(target=app.printer.poll_idle, daemon=True).start()
+    app.mdns = Mdns(args.port, args.avahi_dir)
+
+    def publish_mdns():
+        p = app.printer.profile()
+        app.mdns.publish(p["name"], p["id"])
+
+    app.printer.on_profile = publish_mdns
 
     def refresh_greeting():
         while True:
@@ -1562,6 +2010,7 @@ def main():
                 app.esp.greeting = g
                 app.esp.hello()
                 log("address:", url, f"({host}.local)")
+            publish_mdns()  # the name follows the host name until it is set on the web page
             time.sleep(15)
 
     threading.Thread(target=refresh_greeting, daemon=True).start()
