@@ -65,7 +65,7 @@ from any device on the same network, or bring it on a USB stick.
 | [`SpinOS/`](SpinOS/README.en.md) | a dedicated Pi 3B system image (Buildroot), not yet tried on hardware |
 | [`flasher/`](flasher/index.html) | the browser flasher page (published on GitHub Pages) |
 | [`dev/`](#the-whole-printer-on-a-pc) | the whole printer on a PC without hardware + a self-test |
-| [`docs/plan.md`](docs/plan.md) | the project's first plan (touch panel, `.spincal` jobs), in Russian |
+| [`docs/plan.md`](docs/plan.md) | the project's first plan (touch panel, `.spincal` jobs), in Russian; `firmware/`, `pi/`, `system/`, `tests/` are its empty skeleton |
 
 ## The whole printer on a PC
 
