@@ -50,6 +50,10 @@ average speed is exact and every step is counted. The Pi asks for the angle (`PO
 - **KY-023 joystick** and the breadboard layout (screen and joystick plugged in next to the board): `CONFIG preset=breadboard`.
 - If the screen does not start (wrong type or pins), the board still answers over USB: `CONFIG?` shows what is
   stored, `CONFIG …` or `CONFIG RESET` fix it.
+- **Three kinds of controls, the UI adapted to each:** buttons, KY-040 encoder, KY-023 joystick
+  (`CONFIG input=…`). The hints on the screen say what to do with that device; with the encoder, clockwise
+  makes a value bigger while editing and a fast spin takes bigger steps; on the round screen the encoder turns
+  the menu wheel; on the joystick left is back everywhere. Hint screenshots: [screens/controls_320x240.png](screens/controls_320x240.png).
 - About shows which screen is set up.
 
 ## New in 0.7.2

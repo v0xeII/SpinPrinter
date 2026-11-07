@@ -256,6 +256,30 @@ static float frand(float a, float b) {
 static float renderMs = 0, pushKB = 0, drawMsAvg = 0;
 
 static const char* T(Str s) { return STR[S.lang][s]; }
+
+// ---- the controls (ui_set_input): the hints say what to do with the device on this board.
+//  buttons:  ↑ ↓ OK, hold OK = back
+//  encoder:  turn = move (clockwise = down the list, and = more while editing), press = OK, hold = back
+//  joystick: up / down = move (repeats while held), right or press = OK, left = back
+static int inputMode = 1;  // 1 buttons, 2 encoder, 3 joystick (hw.h IN_*)
+struct HintSet { Str s; const char* txt[2][2]; };  // [encoder, joystick][ru, en]
+static const HintSet HINTS[] = {
+    {S_SURE_HINT, {{"нажми — да · держи — нет", "press = yes · hold = no"}, {"→ да · ← нет", "→ yes · ← no"}}},
+    {S_SETUP_HINT, {{"крути — выбор · нажми · держи — назад", "turn = select · press · hold = back"},
+                    {"↑↓ выбор · → OK · ← назад", "↑↓ select · → OK · ← back"}}},
+    {S_HOLD_STOP, {{"держи кнопку — стоп", "hold the knob to stop"}, {"← — стоп", "← = stop"}}},
+    {S_HINT_FINE, {{"крути · быстро — крупнее", "turn · fast = bigger"},
+                   {"↑↓ шаг · держи — быстрее", "↑↓ step · hold = faster"}}},
+    {S_HINT, {{"крути · нажми — готово", "turn · press = done"},
+              {"↑↓ изменить · → готово", "↑↓ change · → done"}}},
+    {S_BACK_HINT, {{"держи кнопку — назад", "hold the knob to go back"}, {"← назад", "← back"}}},
+};
+static const char* HT(Str s) {  // a hint about the controls
+  if (inputMode == 2 || inputMode == 3)
+    for (auto& h : HINTS)
+      if (h.s == s) return h.txt[inputMode - 2][S.lang ? 1 : 0];
+  return T(s);
+}
 static bool piOk() { return everRx && (now - lastRx) * 1000.f < PI_TIMEOUT_MS; }
 
 static void say(const char* txt, float secs = 1.8f) {
@@ -625,6 +649,7 @@ void ui_key(Key k, uint32_t nowMs) {
     return;
   }
   if (editing) {
+    if (inputMode == 2 && (k == K_UP || k == K_DOWN)) k = k == K_UP ? K_DOWN : K_UP;  // knob: clockwise = more
     if (k == K_UP) changeValue(editItem, +1);
     else if (k == K_DOWN) changeValue(editItem, -1);
     else { endEdit(); hop(); }
@@ -662,7 +687,7 @@ void ui_key(Key k, uint32_t nowMs) {
     }
     case SC_PRINT:
       if (k == K_BACK && !stopping) { stopping = true; H.send("EV STOP"); }
-      else if (k == K_OK) say(T(S_HOLD_STOP), 1.5f);
+      else if (k == K_OK) say(HT(S_HOLD_STOP), 1.5f);
       break;
     case SC_DONE:
       if (k == K_UP || k == K_DOWN) {  // left / right through the three answers
@@ -1016,7 +1041,7 @@ static void drawEditCard(Canvas& c, float fx, float fy, float fw, float tx, floa
   c.textCentered(F_SM, cx, (int)(y + t0), T(ITEM_NAME[it]), DARK, ia * 0.7f);
   char v[20], sub[48] = "";
   const char* unit = "";
-  const char* hint = T(S_HINT);
+  const char* hint = HT(S_HINT);
   switch (it) {
     case I_SU_TURNS: {
       FileEntry& f = files[suFile];
@@ -1032,7 +1057,7 @@ static void drawEditCard(Canvas& c, float fx, float fy, float fw, float tx, floa
       float r = S.rpm;
       fmt2(v, sizeof v, r);
       unit = T(S_RPM);
-      hint = T(S_HINT_FINE);
+      hint = HT(S_HINT_FINE);
       snprintf(sub, sizeof sub, "%.1f %s  ·  %.2f %s", (double)(r * 6.f), T(S_DEG_S), (double)(60.f / r), T(S_SEC_REV));
       break;
     }
@@ -1107,7 +1132,7 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
       char l1[64];
       fitText(F_SM, T(S_NO_FILES2), l1, sizeof l1, (int)LIST_W - 16);
       c.text(F_SM, x, (int)(LIST_TOP + 51 * k), l1, DIM, alpha);
-      fitText(F_SM, T(S_BACK_HINT), l1, sizeof l1, (int)LIST_W - 8);
+      fitText(F_SM, HT(S_BACK_HINT), l1, sizeof l1, (int)LIST_W - 8);
       c.text(F_SM, x, L.H - (L.compact ? 4 : 10), l1, FAINT, alpha * 0.7f);
     }
     c.noClip();
@@ -1190,7 +1215,7 @@ static void drawWheel(Canvas& c, PageView& p, float dx, float alpha, bool active
       c.textCentered(F_MD, (int)(mid + dx), (int)cy - 6, T(S_NO_FILES1), LIGHT, alpha);
       fitText(F_SM, T(S_NO_FILES2), l1, sizeof l1, 170);
       c.textCentered(F_SM, (int)(mid + dx), (int)cy + 16, l1, DIM, alpha);
-      fitText(F_SM, T(S_BACK_HINT), l1, sizeof l1, 150);
+      fitText(F_SM, HT(S_BACK_HINT), l1, sizeof l1, 150);
       c.textCentered(F_SM, (int)(mid + dx), (int)cy + 40, l1, FAINT, alpha * 0.7f);
     }
     c.noClip();
@@ -1356,7 +1381,7 @@ static void drawSetup(Canvas& c, float dx, float ca, float dt) {
   if (!L.sq) c.textCentered(F_SM, (int)(bx + bw / 2), (int)(by + bh / 2 + 24), "OK", DARK, la * 0.55f * s);
   // the warning on a line of its own, else the hint (wide)
   if (!warnOnTop && warn[0]) { fitText(F_SM, warn, b2, sizeof b2, L.W - 24); c.text(F_SM, tx, wy, b2, PINK, la); }
-  else if (!L.sq) c.text(F_SM, tx, wy, T(S_SETUP_HINT), FAINT, la * 0.8f);
+  else if (!L.sq) c.text(F_SM, tx, wy, HT(S_SETUP_HINT), FAINT, la * 0.8f);
   float x, y, w, h;
   editTarget(x, y, w, h);
   if (!L.sq) { x = 8; w = rowW; }
@@ -1415,7 +1440,7 @@ static void drawPrintRound(Canvas& c, float dx, float ca) {
     snprintf(b, sizeof b, "%s: %d", T(S_DROPS), drops);
     c.textCentered(F_SM, mx, 200, b, PINK, ca);
   } else {
-    const char* hint = stopping ? T(S_STOPPING) : (S.dark ? T(S_DARKENED) : T(S_HOLD_STOP));
+    const char* hint = stopping ? T(S_STOPPING) : (S.dark ? T(S_DARKENED) : HT(S_HOLD_STOP));
     fitText(F_SM, hint, b2, sizeof b2, 140);
     c.textCentered(F_SM, mx, 200, b2, stopping ? PINK : FAINT, ca);
   }
@@ -1485,7 +1510,7 @@ static void drawPrint(Canvas& c, float dx, float ca) {
     snprintf(b, sizeof b, "%s: %d", T(S_DROPS), drops);
     c.text(F_SM, xLow, yHint, b, PINK, ca);
   } else {
-    const char* hint = stopping ? T(S_STOPPING) : (S.dark ? T(S_DARKENED) : T(S_HOLD_STOP));
+    const char* hint = stopping ? T(S_STOPPING) : (S.dark ? T(S_DARKENED) : HT(S_HOLD_STOP));
     fitText(F_SM, hint, nm, sizeof nm, r - xLow);
     c.text(F_SM, xLow, yHint, nm, stopping ? PINK : FAINT, ca);
   }
@@ -1565,7 +1590,7 @@ static void drawAbout(Canvas& c, float dx, float ca) {
   snprintf(b, sizeof b, "%d fps · %.1f ms · %.1f KB", (int)(fps + 0.5f), (double)renderMs, (double)pushKB);
   if (L.round) c.textCentered(F_SM, L.W / 2, y0 + 5 * step + 8, b, FAINT, ca);
   else c.textRight(F_SM, r, L.H - (L.compact ? 4 : 8), b, FAINT, ca);
-  if (!L.sq && L.H >= 200) c.text(F_SM, x, L.H - 24, T(S_BACK_HINT), DIM, ca * 0.7f);
+  if (!L.sq && L.H >= 200) c.text(F_SM, x, L.H - 24, HT(S_BACK_HINT), DIM, ca * 0.7f);
 }
 
 static void drawConnect(Canvas& c, float dx, float ca) {
@@ -1576,7 +1601,7 @@ static void drawConnect(Canvas& c, float dx, float ca) {
       c.textCentered(F_MD, mx, L.H / 2 - 8, T(S_NOPI1), LIGHT, ca);
       fitText(F_SM, T(S_NOPI2), fb, sizeof fb, 180);
       c.textCentered(F_SM, mx, L.H / 2 + 14, fb, DIM, ca);
-      fitText(F_SM, T(S_BACK_HINT), fb, sizeof fb, 150);
+      fitText(F_SM, HT(S_BACK_HINT), fb, sizeof fb, 150);
       c.textCentered(F_SM, mx, L.H / 2 + 40, fb, FAINT, ca * 0.7f);
       return;
     }
@@ -1584,7 +1609,7 @@ static void drawConnect(Canvas& c, float dx, float ca) {
     c.text(L.compact ? F_SM : F_MD, x, y, T(S_NOPI1), LIGHT, ca);
     fitText(F_SM, T(S_NOPI2), fb, sizeof fb, L.W - x - 4);
     c.text(F_SM, x, y + 22, fb, DIM, ca);
-    fitText(F_SM, T(S_BACK_HINT), fb, sizeof fb, L.W - x - 4);
+    fitText(F_SM, HT(S_BACK_HINT), fb, sizeof fb, L.W - x - 4);
     c.text(F_SM, x, L.H - (L.compact ? 4 : 8), fb, FAINT, ca * 0.7f);
     return;
   }
@@ -1617,7 +1642,7 @@ static void drawConnect(Canvas& c, float dx, float ca) {
   c.text(F_SM, x, 76, url, PINK, ca);
   if (host[0]) { snprintf(b, sizeof b, "%s %s", T(S_OR), host); c.text(F_SM, x, 96, b, DIM, ca); }
   if (wifi[0]) { snprintf(b, sizeof b, "%s: %s", T(S_WIFI), wifi); c.text(F_SM, x, 122, b, DIM, ca); }
-  c.text(F_SM, x, L.H - 8, T(S_BACK_HINT), FAINT, ca * 0.7f);
+  c.text(F_SM, x, L.H - 8, HT(S_BACK_HINT), FAINT, ca * 0.7f);
 }
 
 static void drawConfirm(Canvas& c) {
@@ -1630,7 +1655,7 @@ static void drawConfirm(Canvas& c) {
   c.textCentered(F_SM, L.W / 2, (int)y + 26, T(ITEM_NAME[confirmItem]), DIM, a);
   c.textCentered(F_LG, L.W / 2, (int)y + 56, T(S_SURE), PINK, a);
   char hb[48];
-  fitText(F_SM, T(S_SURE_HINT), hb, sizeof hb, (int)w - 16);
+  fitText(F_SM, HT(S_SURE_HINT), hb, sizeof hb, (int)w - 16);
   c.textCentered(F_SM, L.W / 2, (int)y + 78, hb, LIGHT, a * 0.7f);
 }
 
@@ -1906,6 +1931,8 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   else if (stillSince < 0) stillSince = now;
   return still && now - stillSince > 2 ? 30 : 60;
 }
+
+void ui_set_input(int mode) { inputMode = mode >= 1 && mode <= 3 ? mode : 1; }
 
 void ui_set_panel(const char* name, bool round) {
   snprintf(panelName, sizeof panelName, "%s", name ? name : "");

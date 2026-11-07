@@ -5,7 +5,8 @@
 
 Runs the shots tool for every screen size (wide 320x170 and 320x240, square 240x240, compact
 160x128, round 240x240) and puts each layout's screens on one sheet: OUT_DIR/<layout>.png.
-The round layout is shown through a round mask, as the glass shows it. Needs Pillow.
+The round layout is shown through a round mask, as the glass shows it. OUT_DIR/controls_320x240.png:
+the screens with hints for buttons, the KY-040 encoder and the KY-023 joystick. Needs Pillow.
 """
 import subprocess
 import sys
@@ -36,7 +37,7 @@ def shots(exe, size, extra, tmp):
     return files
 
 
-def sheet(files, round_, title, cols=4):
+def sheet(files, round_, title, cols=4, label=None):
     ims = []
     for f in files:
         im = Image.open(f).convert("RGB")
@@ -47,7 +48,7 @@ def sheet(files, round_, title, cols=4):
             mask = mask.resize((w, h), Image.LANCZOS)
             back = Image.new("RGB", (w, h), (40, 36, 42))
             im = Image.composite(im, back, mask)
-        ims.append((f.stem.split("_", 1)[1], im.resize((im.width * SCALE, im.height * SCALE), Image.NEAREST)))
+        ims.append(((label or (lambda f: f.stem.split("_", 1)[1]))(f), im.resize((im.width * SCALE, im.height * SCALE), Image.NEAREST)))
     w, h = ims[0][1].size
     pad, lab = 16, 22
     rows = (len(ims) + cols - 1) // cols
@@ -67,6 +68,22 @@ def sheet(files, round_, title, cols=4):
     return out
 
 
+INPUT_SCREENS = ["setup", "edit", "edit_speed", "print", "about", "confirm"]
+
+
+def inputs_sheet(exe, tmp):
+    """The same screens with each kind of controls: the hints follow the device."""
+    files = []
+    for inp in ("buttons", "encoder", "joystick"):
+        d = tmp / inp
+        d.mkdir(parents=True)
+        subprocess.run([exe, "320x240", *([] if inp == "buttons" else [inp]), str(d)], check=True)
+        by = {f.stem.split("_", 1)[1]: f for f in d.glob("*.ppm")}
+        files += [by[n] for n in INPUT_SCREENS]
+    return sheet(files, False, "Controls: buttons / KY-040 encoder / KY-023 joystick (320x240)", cols=len(INPUT_SCREENS),
+                 label=lambda f: f.parent.name + " · " + f.stem.split("_", 1)[1].replace("_", " "))
+
+
 def main():
     exe, outdir = sys.argv[1], Path(sys.argv[2])
     outdir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +92,9 @@ def main():
             files = shots(exe, size, extra, Path(t))
             sheet(files, "round" in extra, title).save(outdir / f"{name}.png", optimize=True)
         print(outdir / f"{name}.png")
+    with tempfile.TemporaryDirectory() as t:
+        inputs_sheet(exe, Path(t)).save(outdir / "controls_320x240.png", optimize=True)
+    print(outdir / "controls_320x240.png")
 
 
 if __name__ == "__main__":
