@@ -76,6 +76,14 @@ button:disabled{opacity:.35;cursor:not-allowed}
 .file .d{color:var(--dim);font-size:12px;margin-top:2px}
 .file button{padding:9px 13px;font-size:13px;border-radius:12px}
 .badge{font-size:11px;font-weight:700;color:var(--dark);background:var(--pink);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:2px}
+.badge.alt{background:transparent;color:var(--pink);border:1px solid var(--pink)}
+.badge.warn{background:var(--warn)}
+.file img.pv{object-fit:contain;width:45px;margin:0 13px}
+.file .e{color:#ff9db8;font-size:12px;margin-top:2px}
+.file .w{color:var(--warn);font-size:12px;margin-top:2px}
+.prof select{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:10px 12px;font:600 15px var(--font)}
+.prof input.txt{flex:1}
+.sheet .pvbig{float:right;width:96px;height:96px;object-fit:contain;border-radius:14px;background:#000;margin:0 0 8px 12px}
 .check{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:14px;margin:6px 0}
 .check input{accent-color:var(--pink);width:18px;height:18px}
 .cal{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
@@ -176,9 +184,9 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
     <section class="card">
       <h2 data-i="videos">Видео для печати</h2>
       <label class="drop" id="drop">
-        <input type="file" id="pick" accept="video/*,.mp4,.mkv,.mov" hidden>
-        <b data-i="drop">Перетащи сюда видео из SpinSlicer</b>
-        <span data-i="drop2">или нажми, чтобы выбрать файл · MP4</span>
+        <input type="file" id="pick" accept=".spin,video/*,.mp4,.mkv,.mov" hidden>
+        <b data-i="drop">Перетащи сюда файл из SpinSlicer</b>
+        <span data-i="drop2">или нажми, чтобы выбрать · .spin или MP4</span>
         <div class="bar" id="bar"><i id="barI"></i></div>
       </label>
       <div class="files" id="files"></div>
@@ -233,18 +241,36 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
     </div>
     <p class="note" data-i="wifiNote">Принтер подключится к этой сети. Потом подключи телефон к той же сети и открой spinslicer.local. Если не вышло, через минуту принтер снова раздаст свою сеть SpinSlicer.</p>
   </section>
+  <section class="card prof" style="margin-top:16px">
+    <h2 data-i="profile">Профиль принтера (для SpinSlicer)</h2>
+    <div class="meta" id="profId"></div>
+    <div class="field"><label data-i="pName">Имя в сети</label><input class="txt" id="pName" maxlength="40" autocomplete="off"></div>
+    <div class="field"><label data-i="pIrr">Облучённость на оси, мВт/см²</label><input type="number" id="pIrr" min="0" max="1000" step="0.01"></div>
+    <div class="field"><label data-i="pContrast">Контраст проектора</label><input type="number" id="pContrast" min="1" step="1"></div>
+    <div class="field"><label data-i="pDiam">Диаметр флакона, мм</label><input type="number" id="pDiam" min="1" max="500" step="0.1"></div>
+    <div class="field"><label data-i="pWall">Стенка флакона, мм</label><input type="number" id="pWall" min="0" max="50" step="0.01"></div>
+    <div class="field"><label data-i="pN">Показатель преломления стекла</label><input type="number" id="pN" min="1" max="3" step="0.001"></div>
+    <div class="field"><label data-i="pGear">Передача мотора</label><input type="number" id="pGear" min="0.01" max="1000" step="0.01"></div>
+    <div class="field"><label data-i="pDir">Флакон крутится (вид сверху)</label>
+      <select id="pDir"><option value="ccw_from_top" data-i="ccw">против часовой</option><option value="cw_from_top" data-i="cw">по часовой</option></select></div>
+    <div class="row"><button id="pSave" data-i="save">Сохранить</button></div>
+    <p class="note" data-i="profNote">SpinSlicer сам находит принтер в сети и берёт отсюда проектор, флакон и калибровку. Пустое поле: неизвестно, слайсер оставит своё. Направление вращения: если видео нарезано для другого, кадры пойдут в обратном порядке.</p>
+  </section>
   <section class="card" style="margin-top:16px">
     <h2 data-i="history">Журнал печатей</h2>
     <div class="hist" id="hist"></div>
+    <p class="note"><a href="/api/history" style="color:var(--dim)" data-i="histAll">весь журнал (JSON, его читает SpinSlicer)</a></p>
   </section>
   <footer id="foot">SpinSlicer · SpinPi</footer>
 </div>
 
 <div class="sheet" id="sheet">
   <div class="box">
+    <img class="pvbig" id="shPv" alt="" style="display:none">
     <h3 id="shName"></h3>
     <div class="meta" id="shMeta"></div>
     <div class="plan" id="shPlan"></div>
+    <div style="clear:both"></div>
     <div class="field" style="margin-top:14px"><label data-i="turns">Обороты</label><input type="number" id="shTurns" min="1" max="999" step="1" value="5"></div>
     <div class="field"><label data-i="factor">Поправка экспозиции, %</label><input type="number" id="shFactor" min="-50" max="100" step="1" value="0"></div>
     <div class="field"><label data-i="delay">Пауза до света, с</label><input type="number" id="delay" min="0" max="60" step="1" value="3"></div>
@@ -260,25 +286,31 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
 
 <script>
 const I18N = {
-  ru:{tag:"принтер объёмной печати",projector:"Проектор",videos:"Видео для печати",drop:"Перетащи сюда видео из SpinSlicer",
-      drop2:"или нажми, чтобы выбрать файл · MP4",motor:"Мотор",rpm:"об/мин",speed:"Скорость, об/мин",spin:"Крутить",stop:"Стоп",
+  ru:{tag:"принтер объёмной печати",projector:"Проектор",videos:"Печати",drop:"Перетащи сюда файл из SpinSlicer",
+      drop2:"или нажми, чтобы выбрать · .spin или MP4",motor:"Мотор",
+      profile:"Профиль принтера (для SpinSlicer)",pName:"Имя в сети",pIrr:"Облучённость на оси, мВт/см²",pContrast:"Контраст проектора",pDiam:"Диаметр флакона, мм",pWall:"Стенка флакона, мм",pN:"Показатель преломления стекла",pGear:"Передача мотора",pDir:"Флакон крутится (вид сверху)",ccw:"против часовой",cw:"по часовой",save:"Сохранить",saved:"Сохранено",
+      profNote:"SpinSlicer сам находит принтер в сети и берёт отсюда проектор, флакон и калибровку. Пустое поле: неизвестно, слайсер оставит своё. Направление вращения: если видео нарезано для другого, кадры пойдут в обратном порядке.",
+      histAll:"весь журнал (JSON, его читает SpinSlicer)",reversed:"обратный ход",reversedLong:"Видео нарезано для вращения в другую сторону: кадры пойдут в обратном порядке, деталь выйдет правильной.",otherPrinter:"Нарезано для другого принтера: проверь проектор и флакон.",resin:"смола",planShort:"расчёт",bad:"не печатается",rpm:"об/мин",speed:"Скорость, об/мин",spin:"Крутить",stop:"Стоп",
       proj:"Проектор · настройка",pBlack:"Чёрный",pWhite:"Белый",pGrid:"Сетка",pFocus:"Фокус",pCircle:"Круг",
       exposure:"Время экспозиции, с",
       revs:"Оборотов в видео",cancel:"Отмена",print:"Печать",
       sIdle:"Готов к печати",sSpin:"Разгоняю флакон…",sPrint:"Печать",sDone:"Готово!",sErr:"Ошибка",
       left:"осталось",sync:"синхронизация",noEsp:"ESP32 не подключена — подключи её к Pi по USB",
-      empty:"Пока пусто. В SpinSlicer: Видео → Сохранить MP4, потом перетащи файл сюда.",
+      empty:"Пока пусто. В SpinSlicer: «Отправить на принтер», или сохрани .spin и перетащи файл сюда.",
       del:"Удалить?",uploaded:"Загружено",busy:"Принтер занят",printLast:"Печать: ",stopPrint:"Остановить",again:"Ещё раз",
       frames:"кадров",rev:"оборот",uploading:"Загрузка",turns:"Обороты",tshort:"об.",factor:"Поправка экспозиции, %",warmup:"Прогрев проектора, мин",history:"Журнал печатей",how:"Как получилось?",under:"Недосвет",ok:"Норма",over:"Пересвет",sWait:"Подготовка",wspin:"разгон мотора",wwarm:"прогрев проектора",wdark:"пауза до света",planOf:"Расчёт SpinSlicer",noPlan:"У этого видео нет расчёта SpinSlicer: подбери обороты сам (или экспортируй видео из новой версии SpinSlicer).",turnsOf:"оборот",of:"из",dose:"доза от расчёта",tol:"допуск",cadence:"Частота кадров не делится на частоту экрана: кадры будут показываться неравное время. Экспортируй 30 или 60 к/с.",doseWarn:"Округление до целых оборотов уводит дозу за половину допуска. Поменяй поправку или сделай в SpinSlicer больше оборотов (меньше яркость).",drops:"пропущено кадров",hdmi:"Проектор не подключён по HDMI",warmLeft:"Проектор прогревается",noHist:"Пока пусто",light:"свет",total:"всего",center:"Центровка, пикс",vialw:"Ширина флакона, пикс",untilStop:"До стопа (остановлю сам)",delay:"Пауза до света, с",usb:"USB",elapsed:"прошло",projNote:"Центровка двигает всё изображение (и при печати), пока линия не совпадёт с осью вращения флакона. Не оставляй смолу под светом!",
       wifi:"Wi-Fi",wifiName:"Сеть",wifiPass:"Пароль",wifiScan:"Найти сети",wifiGo:"Подключить",wifiOn:"Подключён к",wifiAp:"Принтер раздаёт свою сеть «%s». Выбери домашний Wi-Fi:",wifiNone:"Wi-Fi не подключён",wifiGoing:"Подключаюсь… Переключи телефон на домашнюю сеть и открой spinslicer.local",wifiNote:"Принтер подключится к этой сети. Потом подключи телефон к той же сети и открой spinslicer.local. Если не вышло, через минуту принтер снова раздаст свою сеть SpinSlicer."},
-  en:{tag:"volumetric printer",projector:"Projector",videos:"Print videos",drop:"Drop a SpinSlicer video here",
-      drop2:"or tap to choose a file · MP4",motor:"Motor",rpm:"rpm",speed:"Speed, rpm",spin:"Spin",stop:"Stop",
+  en:{tag:"volumetric printer",projector:"Projector",videos:"Prints",drop:"Drop a SpinSlicer file here",
+      drop2:"or tap to choose · .spin or MP4",motor:"Motor",
+      profile:"Printer profile (for SpinSlicer)",pName:"Network name",pIrr:"Irradiance on the axis, mW/cm²",pContrast:"Projector contrast",pDiam:"Vial diameter, mm",pWall:"Vial wall, mm",pN:"Glass refractive index",pGear:"Motor gear ratio",pDir:"The vial turns (seen from the top)",ccw:"counter-clockwise",cw:"clockwise",save:"Save",saved:"Saved",
+      profNote:"SpinSlicer finds the printer on the network and takes the projector, vial and calibration from here. An empty field means unknown: the slicer keeps its own. Turning direction: a video sliced for the other way plays its frames backwards.",
+      histAll:"the whole log (JSON, SpinSlicer reads it)",reversed:"reversed",reversedLong:"The video was sliced for the other turning direction: frames play backwards, the part comes out right.",otherPrinter:"Sliced for another printer: check the projector and the vial.",resin:"resin",planShort:"plan",bad:"cannot print",rpm:"rpm",speed:"Speed, rpm",spin:"Spin",stop:"Stop",
       proj:"Projector · setup",pBlack:"Black",pWhite:"White",pGrid:"Grid",pFocus:"Focus",pCircle:"Circle",
       exposure:"Exposure time, s",
       revs:"Revolutions in the video",cancel:"Cancel",print:"Print",
       sIdle:"Ready to print",sSpin:"Spinning up the vial…",sPrint:"Printing",sDone:"Done!",sErr:"Error",
       left:"left",sync:"sync",noEsp:"ESP32 not connected — plug it into the Pi via USB",
-      empty:"Nothing here yet. In SpinSlicer: Video → Save MP4, then drop the file here.",
+      empty:"Nothing here yet. In SpinSlicer: “Send to printer”, or save a .spin and drop it here.",
       del:"Delete?",uploaded:"Uploaded",busy:"Printer is busy",printLast:"Print: ",stopPrint:"Stop",again:"Print again",
       frames:"frames",rev:"rev",uploading:"Uploading",turns:"Turns",tshort:"turns",factor:"Exposure correction, %",warmup:"Projector warm-up, min",history:"Print log",how:"How did it come out?",under:"Under",ok:"Good",over:"Over",sWait:"Getting ready",wspin:"motor spin-up",wwarm:"projector warm-up",wdark:"dark spin-up",planOf:"SpinSlicer plan",noPlan:"This video has no SpinSlicer plan: pick the turns yourself (or export it from a newer SpinSlicer).",turnsOf:"turn",of:"of",dose:"dose vs plan",tol:"tolerance",cadence:"The frame rate does not divide the screen refresh: frames will stay on screen for unequal times. Export at 30 or 60 fps.",doseWarn:"Rounding to whole turns moves the dose past half the tolerance. Change the correction or make more turns in SpinSlicer (lower brightness).",drops:"dropped frames",hdmi:"Projector not connected over HDMI",warmLeft:"Projector warming up",noHist:"Nothing yet",light:"light",total:"total",center:"Centering, px",vialw:"Vial width, px",untilStop:"Until stop (I will stop it)",delay:"Dark spin-up, s",usb:"USB",elapsed:"elapsed",projNote:"Centering shifts the whole image (prints too) until the line matches the vial rotation axis. Keep resin out of the light!",
       wifi:"Wi-Fi",wifiName:"Network",wifiPass:"Password",wifiScan:"Find networks",wifiGo:"Connect",wifiOn:"Connected to",wifiAp:"The printer runs its own network “%s”. Pick your home Wi-Fi:",wifiNone:"Wi-Fi not connected",wifiGoing:"Connecting… Switch the phone to your home network and open spinslicer.local",wifiNote:"The printer joins this network. Then join the same network with your phone and open spinslicer.local. If it fails, the printer brings back its own SpinSlicer network within a minute."}
@@ -290,7 +322,7 @@ function applyLang(){
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-i]").forEach(e=>e.textContent=t(e.dataset.i));
   $("lang").textContent = lang==="ru" ? "EN" : "RU";
-  render(); renderFiles();
+  render(); renderFiles(); renderProfile();
 }
 const $ = id => document.getElementById(id);
 let S = null, FILES = [], sel = null;
@@ -357,7 +389,7 @@ function render(){
   $("arc").style.strokeDashoffset = 326.7*(1-p);
   $("ringBig").textContent=big; $("ringSub").textContent=sub;
   $("meta").innerHTML=meta; $("heroBtns").innerHTML=btns;
-  document.querySelectorAll("#files button.go").forEach(b=>b.disabled=busy);
+  document.querySelectorAll("#files button.go").forEach(b=>b.disabled=busy||!!b.dataset.bad);
   syncCal();
   renderHist();
   if(document.activeElement!==$("warmN")) $("warmN").value=S.settings.warmup_min;
@@ -372,11 +404,16 @@ function renderFiles(){
     const n=encodeURIComponent(f.id);
     const d=[f.width&&`${f.width}×${f.height}`, f.frames&&`${f.frames} ${t("frames")}`, f.fps&&`${+f.fps.toFixed(2)} fps`].filter(Boolean).join(" · ");
     const r=f.rpm?`${f.rpm.toFixed(2)} ${t("rpm")} · ${t("rev")} ${f.rev_s.toFixed(1)} s · ${fmtMB(f.size)}`:fmtMB(f.size);
-    const usb=f.source==="usb";
+    const usb=f.source==="usb", spin=f.format==="spin";
+    const plan=f.plan_revs?`${t("planShort")} ${f.plan_revs.toFixed(2)} ${t("tshort")} · ${fmtT(f.plan_revs*f.rev_s)}`+
+      (f.resin&&f.resin.name?` · ${t("resin")} ${esc(f.resin.name)}`:""):"";
+    const warn=[f.other_printer&&t("otherPrinter"),...(f.warnings||[]).map(esc)].filter(Boolean).join(" · ");
     return `<div class="file${S&&S.settings.last_id===f.id?" sel":""}">
-      <img src="/api/thumb?id=${n}&v=${f.size}" alt="" onerror="this.style.visibility='hidden'">
-      <div class="t"><div class="n">${esc(f.name)}${usb?`<span class="badge">${t("usb")}</span>`:""}</div><div class="d">${d}</div><div class="d">${r}</div></div>
-      <button class="go" onclick="openSheet('${n}')">${t("print")}</button>
+      <img${f.preview?' class="pv"':""} src="/api/thumb?id=${n}&v=${f.size}" alt="" onerror="this.style.visibility='hidden'">
+      <div class="t"><div class="n" title="${esc(f.title||"")}">${esc(f.name)}${spin?`<span class="badge alt">.spin</span>`:""}${usb?`<span class="badge">${t("usb")}</span>`:""}${f.reversed?`<span class="badge warn" title="${esc(t("reversedLong"))}">↺ ${t("reversed")}</span>`:""}</div>
+        ${f.error?`<div class="e">${t("bad")}: ${esc(f.error)}</div>`:`<div class="d">${d}</div><div class="d">${r}</div>`}
+        ${plan?`<div class="d">${plan}</div>`:""}${warn?`<div class="w">${warn}</div>`:""}</div>
+      <button class="go" onclick="openSheet('${n}')"${f.error||!f.rpm?" data-bad=1 disabled":""}>${t("print")}</button>
       ${usb?"":`<button class="ghost" onclick="delFile('${n}')" aria-label="delete">✕</button>`}</div>`;
   }).join("");
 }
@@ -405,8 +442,9 @@ async function delFile(n){ const id=decodeURIComponent(n); if(!confirm(t("del")+
 
 // print sheet
 function openSheet(n){
-  sel=decodeURIComponent(n); const f=FILES.find(x=>x.id===sel); if(!f) return;
+  sel=decodeURIComponent(n); const f=FILES.find(x=>x.id===sel); if(!f||!f.rpm) return;
   $("shName").textContent=f.name;
+  $("shPv").style.display=f.preview?"":"none"; if(f.preview) $("shPv").src=`/api/thumb?id=${n}&v=${f.size}`;
   $("shMeta").textContent=f.rpm?`${f.rpm.toFixed(2)} ${t("rpm")} · ${f.frames} ${t("frames")} · ${+f.fps.toFixed(2)} fps`:"";
   const fac=S?S.settings.factor:1;
   $("shFactor").value=Math.round(100*(fac-1));
@@ -430,6 +468,9 @@ async function updatePlan(){
   const tol=p.tolerance_pct||5;
   if(p.dose_dev_pct!=null && Math.abs(p.dose_dev_pct)>tol/2) h+=`<div class="w">${t("doseWarn")}</div>`;
   if(!p.cadence_ok) h+=`<div class="w">${t("cadence")}</div>`;
+  if(p.reversed) h+=`<div class="w">↺ ${t("reversedLong")}</div>`;
+  if(p.other_printer) h+=`<div class="w">${t("otherPrinter")}</div>`;
+  (p.warnings||[]).forEach(w=>{ h+=`<div class="w">SpinSlicer: ${esc(w)}</div>`; });
   $("shSum").innerHTML=h;
 }
 $("shFactor").oninput=()=>updatePlan();
@@ -447,8 +488,29 @@ async function stopPrint(){ await api("/api/stop",{}); }
 async function sendResult(r){ const x=await api("/api/result",{result:r}); if(x.ok) toast(`${t("factor")}: ${x.factor_pct>=0?"+":""}${x.factor_pct.toFixed(0)}`); }
 function renderHist(){
   const h=(S.history||[]).slice().reverse();
-  $("hist").innerHTML = h.length ? h.map(e=>`<div><b>${esc(e.file)}</b><span>${e.revs} ${t("tshort")} · ${fmtT(e.time_s)} · ${e.factor>=1?"+":""}${Math.round(100*(e.factor-1))}% · ${e.result?t(e.result):"—"}</span></div>`).join("") : `<div>${t("noHist")}</div>`;
+  $("hist").innerHTML = h.length ? h.map(e=>`<div><b>${esc(e.file)}</b><span>${e.revs}${e.plan_revs?" / "+(+e.plan_revs).toFixed(2):""} ${t("tshort")} · ${fmtT(e.time_s)} · ${e.factor>=1?"+":""}${Math.round(100*(e.factor-1))}%`+
+    `${e.resin&&e.resin.name?" · "+esc(e.resin.name):""}${e.reversed?" · ↺":""} · ${e.result?t(e.result):"—"}</span></div>`).join("") : `<div>${t("noHist")}</div>`;
 }
+// printer profile (GET/POST /api/printer)
+let PROF=null;
+const PF={pIrr:"irradiance_mw_cm2",pContrast:"contrast",pDiam:"vial_diameter_mm",pWall:"vial_wall_mm",pN:"vial_n",pGear:"motor_gear"};
+function renderProfile(){
+  const p=PROF; if(!p) return;
+  $("profId").innerHTML=`id <b>${esc(p.id)}</b> · ${p.projector.width}×${p.projector.height}`+(p.projector.hz?` · ${(+p.projector.hz).toFixed(1)} Hz`:"")+
+    ` · ${t("center")} ${p.calibration.offset_px} · ${t("vialw")} ${p.calibration.vial_width_px}`;
+  if(document.activeElement && document.activeElement.closest && document.activeElement.closest(".prof")) return;
+  $("pName").value=p.name||"";
+  const v={pIrr:p.projector.irradiance_mw_cm2,pContrast:p.projector.contrast,pDiam:p.vial.diameter_mm,pWall:p.vial.wall_mm,pN:p.vial.n_glass,pGear:p.motor.gear};
+  Object.keys(v).forEach(k=>$(k).value=v[k]==null?"":v[k]);
+  $("pDir").value=p.motor.direction;
+}
+async function loadProfile(){ try{ PROF=await api("/api/printer"); renderProfile(); }catch(e){} }
+$("pSave").onclick=async()=>{
+  const b={name:$("pName").value.trim(),motor_dir:$("pDir").value};
+  Object.entries(PF).forEach(([id,k])=>{ const x=$(id).value.trim(); b[k]=x===""?null:+x; });
+  const r=await api("/api/printer",b);
+  if(r.ok){ PROF=r.printer; document.activeElement.blur(); renderProfile(); loadFiles(); toast(t("saved")); } else toast(r.error);
+};
 $("warmN").onchange=()=>api("/api/settings",{warmup_min:+$("warmN").value});
 
 // motor + projector
@@ -489,7 +551,7 @@ async function loadWifi(scan){
 }
 $("wifiScan").onclick=()=>loadWifi(true);
 $("wifiGo").onclick=async()=>{ const r=await api("/api/wifi",{ssid:$("wifiSsid").value.trim(),psk:$("wifiPsk").value}); toast(r.ok?t("wifiGoing"):r.error); };
-applyLang(); loadFiles(); connect(); loadWifi(true);
+applyLang(); loadFiles(); connect(); loadWifi(true); loadProfile();
 </script>
 </body>
 </html>

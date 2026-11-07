@@ -57,7 +57,8 @@ frame, how even the vsyncs are and how many were missed. The last line `RESULT �
 | `STOP` / `BLACK` | dark |
 | `IMAGE <file.pgm>` | a test picture (grid, center…) |
 | `OFFSET <px>` | shift the picture sideways (centering on the rotation axis) |
-| `PHASE <°>` | the angle that shows frame 0 (default 0) |
+| `PHASE <°>` | the angle that shows frame 0 (default 0; SpinPi sends `frame0_angle_deg` from the `.spin`) |
+| `REVERSE <0\|1>` | 1: the video was sliced for the other turning direction, frames go backwards (frame 0 stays at `PHASE`). SpinPi sends it before `LOAD` |
 | `PING` / `QUIT` | |
 
 | reply (stdout) | when |
