@@ -1,5 +1,5 @@
 # Builds the SpinScreen firmware (ESP32-S3) and publishes the browser flasher on GitHub Pages:
-#   https://v0xeii.github.io/SpinPrinter/   (Chrome/Edge, Windows/Linux/Mac, no Arduino IDE)
+#   https://v0xeii.github.io/SpinPrinter/flasher/   (Chrome/Edge, Windows/Linux/Mac, no Arduino IDE)
 # One-time setup in the repository: Settings -> Pages -> Source: GitHub Actions.
 # A tag v* also attaches the firmware files to a GitHub release.
 name: firmware
@@ -27,33 +27,24 @@ jobs:
         run: arduino-cli compile --fqbn "$FQBN" --build-path build SpinScreen_v0.7/SpinScreen
       - name: flasher site (page + firmware parts + manifest)
         run: |
+          # the same files as flasher/ in the repo (bash SpinScreen_v0.7/tools/update_flasher.sh),
+          # but with the firmware just built here; served at /flasher/ and, for Actions-mode Pages, at /
+          rm -rf site && mkdir -p site
+          cp -r flasher site/flasher
+          cp docs/wiring.svg site/flasher/wiring.svg
+          mkdir -p site/flasher/fw
+          cp build/SpinScreen.ino.bootloader.bin site/flasher/fw/bootloader.bin
+          cp build/SpinScreen.ino.partitions.bin site/flasher/fw/partitions.bin
+          cp build/SpinScreen.ino.bin site/flasher/fw/spinscreen.bin
+          cp "$(find ~/.arduino15/packages/esp32/hardware/esp32 -name boot_app0.bin | head -1)" site/flasher/fw/boot_app0.bin
           VER=$(sed -n 's/#define FW_VERSION "\(.*\)"/\1/p' SpinScreen_v0.7/SpinScreen/config.h)
-          mkdir -p site/fw
-          cp flasher/index.html docs/wiring.svg site/
-          cp build/SpinScreen.ino.bootloader.bin site/fw/bootloader.bin
-          cp build/SpinScreen.ino.partitions.bin site/fw/partitions.bin
-          cp build/SpinScreen.ino.bin site/fw/spinscreen.bin
-          cp "$(find ~/.arduino15/packages/esp32/hardware/esp32 -name boot_app0.bin | head -1)" site/fw/boot_app0.bin
-          cp build/SpinScreen.ino.merged.bin site/fw/spinscreen-merged.bin
-          # separate parts, not the merged image: the settings partition (nvs, 0x9000) is left alone
-          cat > site/manifest.json <<JSON
-          {
-            "name": "SpinScreen",
-            "version": "$VER",
-            "new_install_prompt_erase": false,
-            "builds": [{
-              "chipFamily": "ESP32-S3",
-              "parts": [
-                {"path": "fw/bootloader.bin", "offset": 0},
-                {"path": "fw/partitions.bin", "offset": 32768},
-                {"path": "fw/boot_app0.bin", "offset": 57344},
-                {"path": "fw/spinscreen.bin", "offset": 65536}
-              ]
-            }]
-          }
-          JSON
-          python3 -m json.tool site/manifest.json > /dev/null
-          ls -la site site/fw
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VER\"/" site/flasher/manifest.json
+          python3 -m json.tool site/flasher/manifest.json > /dev/null
+          cp -r site/flasher/. site/
+          cp build/SpinScreen.ino.merged.bin site/spinscreen-merged.bin
+          # the committed flasher/ must match the source: a reminder, not a failure
+          cmp -s build/SpinScreen.ino.bin flasher/fw/spinscreen.bin || echo "::warning::flasher/fw is older than the firmware source: run SpinScreen_v0.7/tools/update_flasher.sh and commit"
+          ls -la site site/flasher/fw
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
@@ -62,14 +53,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp site/fw/spinscreen-merged.bin "spinscreen-${GITHUB_REF_NAME}-merged.bin"
+          cp site/spinscreen-merged.bin "spinscreen-${GITHUB_REF_NAME}-merged.bin"
           gh release create "$GITHUB_REF_NAME" "spinscreen-${GITHUB_REF_NAME}-merged.bin" --title "SpinPrinter $GITHUB_REF_NAME" \
-            --notes "SpinScreen firmware: flash from the browser at https://v0xeii.github.io/SpinPrinter/ or write the merged image at 0x0." \
+            --notes "SpinScreen firmware: flash from the browser at https://v0xeii.github.io/SpinPrinter/flasher/ or write the merged image at 0x0." \
             || gh release upload "$GITHUB_REF_NAME" "spinscreen-${GITHUB_REF_NAME}-merged.bin" --clobber
     permissions:
       contents: write
   pages:
-    if: github.ref == 'refs/heads/main'
+    # only when Pages is set to "GitHub Actions"; in branch mode GitHub publishes main by itself
+    if: github.ref == 'refs/heads/main' && vars.PAGES_FROM_ACTIONS == 'true'
     needs: build
     runs-on: ubuntu-24.04
     permissions:

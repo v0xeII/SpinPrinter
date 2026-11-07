@@ -21,7 +21,7 @@ the current angle goes up. The video cannot drift, and the light goes off after 
 
 Step by step for Windows, Mac and Linux: **[docs/INSTALL.md](docs/INSTALL.md)**. In short:
 
-1. **Flash the ESP32-S3:** open the [browser flasher](https://v0xeii.github.io/SpinPrinter/) in Chrome or Edge
+1. **Flash the ESP32-S3:** open the [browser flasher](https://v0xeii.github.io/SpinPrinter/flasher/) in Chrome or Edge
    → "Flash SpinScreen". No Arduino IDE needed.
 2. **Set up the Raspberry Pi:**
    - any OS: Raspberry Pi Imager → Raspberry Pi OS Lite (64-bit) with your Wi-Fi and SSH, then one command on the Pi:

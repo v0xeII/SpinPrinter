@@ -67,7 +67,7 @@ The Raspberry Pi: USB cable, or wires as in the [wiring diagram](../docs/wiring.
 
 ## Flashing
 
-**Easiest, in the browser** (Windows, Mac, Linux): https://v0xeii.github.io/SpinPrinter/ in Chrome or Edge.
+**Easiest, in the browser** (Windows, Mac, Linux): https://v0xeii.github.io/SpinPrinter/flasher/ in Chrome or Edge.
 
 **One command** (board on USB, Arduino IDE 2 with the esp32 core installed): `bash SpinScreen_v0.7/tools/flash.sh`
 

@@ -73,7 +73,7 @@
 
 ## Прошить
 
-**Проще всего — из браузера** (Windows, Mac, Linux): https://v0xeii.github.io/SpinPrinter/ в Chrome или Edge.
+**Проще всего — из браузера** (Windows, Mac, Linux): https://v0xeii.github.io/SpinPrinter/flasher/ в Chrome или Edge.
 
 **Одной командой** (плата подключена к компьютеру USB-кабелем, Arduino IDE 2 с ядром esp32 установлен):
 ```

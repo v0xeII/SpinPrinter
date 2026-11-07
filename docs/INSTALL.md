@@ -10,7 +10,7 @@ projector with HDMI. And a computer with Windows, Mac or Linux.
 
 **In the browser (Windows, Mac, Linux, nothing to install):**
 1. Plug the ESP32-S3 into the computer with a USB cable **that carries data**.
-2. Open **https://v0xeii.github.io/SpinPrinter/** in Chrome or Edge.
+2. Open **https://v0xeii.github.io/SpinPrinter/flasher/** in Chrome or Edge.
 3. "Flash SpinScreen" → pick the port `USB JTAG/serial debug unit` (`COM…` on Windows) → "Install".
 4. Half a minute later Spinny the axolotl swims on the screen.
 

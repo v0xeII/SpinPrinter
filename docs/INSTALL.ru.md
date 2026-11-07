@@ -9,7 +9,7 @@
 
 **Через браузер (Windows, Mac, Linux, ничего ставить не нужно):**
 1. Подключи ESP32-S3 к компьютеру USB-кабелем **с данными**.
-2. Открой **https://v0xeii.github.io/SpinPrinter/** в Chrome или Edge.
+2. Открой **https://v0xeii.github.io/SpinPrinter/flasher/** в Chrome или Edge.
 3. «Прошить SpinScreen» → выбери порт `USB JTAG/serial debug unit` (на Windows `COM…`) → «Install».
 4. Через полминуты на экране появится аксолотль Spinny.
 

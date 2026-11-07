@@ -21,7 +21,7 @@ ESP32 считает каждый шаг мотора, и на каждом об
 
 Подробно по шагам, для Windows, Mac и Linux: **[docs/INSTALL.ru.md](docs/INSTALL.ru.md)**. Коротко:
 
-1. **Прошить ESP32-S3:** открыть [страницу-прошивальщик](https://v0xeii.github.io/SpinPrinter/) в Chrome или Edge
+1. **Прошить ESP32-S3:** открыть [страницу-прошивальщик](https://v0xeii.github.io/SpinPrinter/flasher/) в Chrome или Edge
    → «Прошить SpinScreen». Arduino IDE не нужен.
 2. **Подготовить Raspberry Pi:**
    - любая ОС: Raspberry Pi Imager → Raspberry Pi OS Lite (64-bit) с твоим Wi-Fi и SSH, затем на Pi одна команда:
