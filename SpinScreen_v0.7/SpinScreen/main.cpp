@@ -1,6 +1,7 @@
 // setup() and loop() live here (not in the .ino) so the Arduino IDE needs no code generation.
 #include <Arduino.h>
 #include <Preferences.h>
+#include <driver/gpio.h>
 #include <esp_timer.h>
 
 #include "config.h"
@@ -18,14 +19,32 @@ static Preferences prefs;
 static MotorConfig toMotor(const Settings& s) {
   return MotorConfig{s.stepsRev, s.micro, s.gear, s.accel, s.dirInv != 0};
 }
-// one write() per line, so lines from the two tasks never interleave
+// The Pi can be on the USB cable or on three wires (UART: GPIO44 RX, GPIO43 TX). Both are
+// listened to all the time; answers go where the Pi's PING last came from (before the first
+// PING: to both). So either way works, and switching from one to the other needs nothing.
+struct Link {
+  Stream* io;
+  char buf[128];
+  int n;
+  bool junk;  // this line had bytes no Pi sends (a floating wire): dropped
+};
+static Link links[2] = {{&Serial, {0}, 0, false}, {&Serial0, {0}, 0, false}};
+static volatile int active = -1;  // index into links, -1 = not known yet
+
+// one write() per line, so lines never interleave
 static void sendLine(const char* line) {
   char b[160];
   int n = snprintf(b, sizeof b - 1, "%s\n", line);
   if (n > (int)sizeof b - 2) n = sizeof b - 2;
-  Serial.write((const uint8_t*)b, n);
+  for (int i = 0; i < 2; i++)
+    if (active < 0 || active == i) links[i].io->write((const uint8_t*)b, n);
 }
-static void hSend(const char* line) { sendLine(line); }
+// Lines from the UI go out through the serial task. A USB write can block for ~100 ms when the
+// computer at the other end is not reading (port not opened); in the UI loop that froze the
+// screen and made Spinny jump. Queued, the UI never waits: if nobody reads, lines are dropped.
+static QueueHandle_t txq;
+struct Line;
+static void hSend(const char* line);
 static void hSpin(bool on, float rpm) { motor_set(on, rpm); }
 static void hBright(int pct) { display_backlight(pct); }
 static void hSave(const Settings& s) {
@@ -47,42 +66,60 @@ static void hCfg(const Settings& s) { motor_config(toMotor(s)); }
 static void hZero() { motor_zero(); }
 static void hMove(double deg, float rpm) { motor_move(deg, rpm); }
 
-// ---- USB serial runs in its own task so angle queries are answered within ~1 ms,
+// ---- the Pi link runs in its own task so angle queries are answered within ~1 ms,
 //      even while a frame is being drawn. Everything else is handed to the UI loop.
 static QueueHandle_t lines;
 struct Line { char s[128]; };
+static void hSend(const char* line) {
+  Line l;
+  strncpy(l.s, line, sizeof l.s);
+  l.s[sizeof l.s - 1] = 0;
+  if (txq) xQueueSend(txq, &l, 0);
+}
+
+// a whole line from link k: answer the time-critical ones here, queue the rest for the UI
+static void handleLine(int k, const char* buf) {
+  if (!strcmp(buf, "PING")) active = k;  // the Pi is on this one
+  if (!strcmp(buf, "POS")) {  // time-critical: answer right here
+    char out[64];
+    snprintf(out, sizeof out, "POS %.4f %.4f %d", motor_angle(), (double)motor_rpm(), motor_at_speed() ? 1 : 0);
+    sendLine(out);
+    return;
+  } else if (!strcmp(buf, "ZERO")) {
+    motor_zero();
+    sendLine("ZEROED");
+    return;
+  } else if (!strncmp(buf, "SETANGLE ", 9)) {
+    motor_set_angle(atof(buf + 9));
+    sendLine("ANGLE");
+    return;
+  }
+  Line l;
+  strncpy(l.s, buf, sizeof l.s);
+  l.s[sizeof l.s - 1] = 0;
+  xQueueSend(lines, &l, 0);
+}
 
 static void serialTask(void*) {
-  char buf[128];
-  int n = 0;
   for (;;) {
-    while (Serial.available()) {
-      char ch = (char)Serial.read();
-      if (ch == '\r') continue;
-      if (ch != '\n') {
-        if (n < (int)sizeof(buf) - 1) buf[n++] = ch;
-        continue;
+    Line out;
+    while (xQueueReceive(txq, &out, 0) == pdTRUE) sendLine(out.s);
+    for (int k = 0; k < 2; k++) {
+      Link& L = links[k];
+      while (L.io->available()) {
+        uint8_t ch = (uint8_t)L.io->read();
+        if (ch == '\r') continue;
+        if (ch != '\n') {
+          if (ch < 0x20 && ch != '\t') L.junk = true;
+          if (L.n < (int)sizeof(L.buf) - 1) L.buf[L.n++] = (char)ch;
+          continue;
+        }
+        L.buf[L.n] = 0;
+        bool ok = !L.junk && L.n > 0;
+        L.n = 0;
+        L.junk = false;
+        if (ok) handleLine(k, L.buf);
       }
-      buf[n] = 0;
-      n = 0;
-      if (!strcmp(buf, "POS")) {  // time-critical: answer right here
-        char out[64];
-        snprintf(out, sizeof out, "POS %.4f %.4f %d", motor_angle(), (double)motor_rpm(), motor_at_speed() ? 1 : 0);
-        sendLine(out);
-        continue;
-      } else if (!strcmp(buf, "ZERO")) {
-        motor_zero();
-        sendLine("ZEROED");
-        continue;
-      } else if (!strncmp(buf, "SETANGLE ", 9)) {
-        motor_set_angle(atof(buf + 9));
-        sendLine("ANGLE");
-        continue;
-      }
-      Line l;
-      strncpy(l.s, buf, sizeof l.s);
-      l.s[sizeof l.s - 1] = 0;
-      xQueueSend(lines, &l, 0);
     }
     vTaskDelay(1);
   }
@@ -90,6 +127,8 @@ static void serialTask(void*) {
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
+  Serial0.begin(SERIAL_BAUD, SERIAL_8N1, PIN_PI_RX, PIN_PI_TX);  // the three-wire link
+  gpio_pullup_en((gpio_num_t)PIN_PI_RX);  // no wire on RX: idle high, not noise
   prefs.begin("spinscreen", false);
   Settings s;
   s.rpm = prefs.getFloat("rpm", RPM_DEFAULT);
@@ -115,8 +154,9 @@ void setup() {
   UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove};
   ui_init(hal, s, millis());
   lines = xQueueCreate(16, sizeof(Line));
+  txq = xQueueCreate(24, sizeof(Line));
   xTaskCreatePinnedToCore(serialTask, "serial", 4096, nullptr, 5, nullptr, 0);
-  Serial.println("READY SpinScreen " FW_VERSION);
+  sendLine("READY SpinScreen " FW_VERSION);
 }
 
 void loop() {

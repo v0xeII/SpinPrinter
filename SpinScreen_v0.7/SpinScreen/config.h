@@ -4,7 +4,7 @@
 // ============================================================
 #pragma once
 
-#define FW_VERSION "0.7.0"
+#define FW_VERSION "0.7.2"
 
 // ---------- Экран ST7789 (SPI) ----------
 //  экран  ->  ESP32-S3
@@ -78,6 +78,15 @@
 #define RPM_MAX 30.0f
 #define RPM_DEFAULT 4.0f        // SpinSlicer по умолчанию: 360 кадров при 24 Гц = 4 об/мин
 
-// ---------- Связь с Raspberry Pi (USB-кабель) ----------
+// ---------- Связь с Raspberry Pi ----------
+// Работают оба способа, одновременно (прошивка сама отвечает туда, где Pi):
+//  * USB-кабель: USB-C платы в любой USB-порт Pi;
+//  * 4 провода к гребёнке Pi (TX и RX накрест):
+//      ESP RX (GPIO44)  <-  Pi пин 8  (GPIO14, TX)
+//      ESP TX (GPIO43)  ->  Pi пин 10 (GPIO15, RX)
+//      ESP GND          --  Pi пин 6  (GND)
+//      ESP 5V           <-  Pi пин 2  (5V)   (питание платы, если нет USB-кабеля)
+#define PIN_PI_RX 44
+#define PIN_PI_TX 43
 #define SERIAL_BAUD 115200
 #define PI_TIMEOUT_MS 3000      // если от Pi нет сообщений столько времени: "Pi не подключена"

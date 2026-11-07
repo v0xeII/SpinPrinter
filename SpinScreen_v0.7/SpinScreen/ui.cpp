@@ -209,6 +209,7 @@ struct Brain {
   float nextAir = 45, airT = -10;  // swims up to gulp air now and then
   float startleT = -10, sleepX = -1;
   int startleDir = 1;
+  int side = 1;        // which way he faces for the current goal (+1 right, -1 left)
   float x = 0, y = 0;  // body centre (for the glow and the z's)
 };
 static Brain B;
@@ -1269,7 +1270,7 @@ static void think(float dt, bool visible, float s) {
     if (u > 1.0f && u < 1.4f) B.eatT = now - 0.2f;  // mouth open at the top
   } else {
     if (now > B.nextWander) {  // now and then: a few strokes on the same side, or turn and cross over
-      bool right = spinnyFacingRight(B.body);
+      bool right = B.side > 0;
       if (frand(0, 1) < 0.45f) B.tx = right ? frand(rMin, xMax) : frand(xMin, lMax);
       else B.tx = right ? frand(xMin, lMax) : frand(rMin, xMax);
       B.nextWander = now + frand(4.5f, 10);
@@ -1290,7 +1291,7 @@ static void think(float dt, bool visible, float s) {
       fprintf(stderr, "food at %.1f s\n", (double)now);
 #endif
       B.food = true;
-      B.fx = frand(xMin + 6, xMax - 6);
+      B.fx = frand(0, 1) < 0.5f ? frand(xMin + 6, lMax) : frand(rMin, xMax - 6);  // where he can reach it
       B.fy = L.artY0 + 4;
       B.fa = 0;
       B.nextFood = now + frand(25, 45);
@@ -1308,9 +1309,23 @@ static void think(float dt, bool visible, float s) {
     if (B.fy > yMax + 14 || !visible || screen != SC_MENU) B.food = false;
   }
   if (screen != SC_BOOT) {
-    bool right = g.tx > headX + 6 ? true : (g.tx < headX - 6 ? false : spinnyFacingRight(B.body));
-    g.tx = right ? clampf(g.tx, rMin, xMax) : clampf(g.tx, xMin, lMax);
+    // Facing right the head needs a body length of room on its left, and the other way round,
+    // so each side has its own range for the head. A goal that suits both sides (or neither:
+    // the middle of a narrow corner) keeps the side he has. Without this, a goal in the middle
+    // made him turn back and forth for ever (the "twitching").
+    float tR = clampf(g.tx, rMin, xMax), tL = clampf(g.tx, xMin, lMax);
+    float dR = fabsf(tR - g.tx), dL = fabsf(tL - g.tx);
+    if (B.side > 0 ? dL + 10 < dR : dR + 10 < dL) B.side = -B.side;
+    g.tx = B.side > 0 ? tR : tL;
     g.ty = clampf(g.ty, yMin, yMax + 6 * s);
+    // a small step backwards on his own side: paddle there, no U-turn
+    bool facing = spinnyFacingRight(B.body) == (B.side > 0);
+    if (facing && (g.tx - headX) * B.side < -2 && fabsf(g.tx - headX) < 40 * s) g.hover = true;
+    g.face = B.side;
+    g.wx0 = L.artX0 + 1;
+    g.wx1 = L.artX1 - 1;
+    g.wy0 = L.artY0;
+    g.wy1 = L.artY1;
   }
   spinnyUpdate(B.body, g, dt, s);
   float e = (now - B.eatT) / 0.4f;
@@ -1381,6 +1396,10 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   axoFade.step(dt, 10);
   float sa = clampf(1 - leftDial.v * 1.6f, 0, 1) * (1 - spHide.v) * axoFade.v;
   float da = clampf(leftDial.v * 1.6f - 0.6f, 0, 1);
+#ifdef UI_PROBE
+  extern float ui_probe_sa;
+  ui_probe_sa = sa;
+#endif
   think(dt, sa > 0.5f, spS.v);
 
   c.noClip();
@@ -1440,3 +1459,9 @@ void ui_stats(float frameMs, float kbPerFrame) {
   renderMs += (frameMs - renderMs) * 0.1f;
   pushKB += (kbPerFrame - pushKB) * 0.1f;
 }
+
+#ifdef UI_PROBE  // PC tests only (sim/spinny_stress.cpp): look at Spinny from outside
+float ui_probe_sa = 0;
+const SpinnyBody& ui_probe_body() { return B.body; }
+void ui_probe_area(float* a) { a[0] = L.artX0; a[1] = L.artX1; a[2] = L.artY0; a[3] = L.artY1; a[4] = spS.v; a[5] = screen; }
+#endif

@@ -32,3 +32,6 @@ clean:
 	rm -f virtual_esp sim bench qr.o
 
 .PHONY: all clean
+
+spinny_stress: spinny_stress.cpp $(FW) qr.o
+	$(CXX) $(CXXFLAGS) -DUI_PROBE spinny_stress.cpp ../SpinScreen/ui.cpp qr.o -o $@

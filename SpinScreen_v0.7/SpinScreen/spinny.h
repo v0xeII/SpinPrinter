@@ -93,9 +93,16 @@ struct SpinnyBody {
 struct SpinnyGoal {
   float tx = 0, ty = 0;  // where the head wants to be
   float maxV = 45;       // how fast he may swim
-  bool hover = false;    // close enough: stay, face sideways
+  bool hover = false;    // close enough: stay, face sideways (and drift there without turning)
   float sink = 0;        // >0 while hovering: drop the whole body level at this speed (px/s)
+  int face = 0;          // while hovering: +1 face right, -1 face left, 0 = keep the way he faces
+  // walls for the body (his corner). The head is steered by the goal; the rest of the body
+  // bends away from a wall (towards the viewer) instead of poking through it.
+  float wx0 = -1e9f, wx1 = 1e9f, wy0 = -1e9f, wy1 = 1e9f;
 };
+
+// body thickness per joint (px at scale 1), shared by the physics walls and the drawing
+static const float SP_R[SPN] = {5.6f, 10.6f, 12.9f, 12.7f, 9.3f, 9.5f, 10.3f, 10.1f, 9.1f, 7.6f, 5.8f, 4.2f, 2.9f, 1.8f, 0.9f};
 
 static inline float spWrap(float a) {
   while (a > 3.14159265f) a -= 6.2831853f;
@@ -140,7 +147,8 @@ static inline void spinnyUpdate(SpinnyBody& b, const SpinnyGoal& g, float dt, fl
   bool hover = g.hover || dist < 4;
   // desired heading: towards the goal; while hovering, sideways (profile) on the nearer side
   float yawD;
-  if (hover || fabsf(dx) < 6) yawD = fcos(b.yaw) >= 0 ? 0.f : 3.14159265f;
+  if (hover && g.face) yawD = g.face > 0 ? 0.f : 3.14159265f;
+  else if (hover || fabsf(dx) < 6) yawD = fcos(b.yaw) >= 0 ? 0.f : 3.14159265f;
   else yawD = atan2f(-b.z[0] * 0.05f, dx);
   float err = spWrap(yawD - b.yaw);
   if (fabsf(err) > 2.7f) err = (fcos(b.yaw) >= 0 ? 1.f : -1.f) * fabsf(err);  // turn round towards the viewer
@@ -182,6 +190,27 @@ static inline void spinnyUpdate(SpinnyBody& b, const SpinnyGoal& g, float dt, fl
     ex += (hx - ex) * kStraight; ey += (hy - ey) * kStraight; ez += (hz - ez) * kStraight;
     l = fsqrt(ex * ex + ey * ey + ez * ez);
     pdx = ex / l; pdy = ey / l; pdz = ez / l;
+    // a wall in the way: keep this joint just inside it and turn the rest of the segment
+    // towards the viewer (it looks like the tail curling round in 3D, never like a cut)
+    float r = SP_R[i] * s, wave = (1.2f + 6.f * (float)i * i / ((SPN - 1) * (SPN - 1))) * 1.2f * s;
+    float nx = b.x[i - 1] + pdx * seg, ny = b.y[i - 1] + pdy * seg;
+    bool hit = false;
+    float wk = 1 - expf(-dt * 14.f);  // firm but not instant: no snap when the walls appear (boot -> menu)
+    if (nx > g.wx1 - r || nx < g.wx0 + r) {
+      float wx = nx > g.wx1 - r ? g.wx1 - r : g.wx0 + r;
+      pdx += (clampf((wx - b.x[i - 1]) / seg, -1, 1) - pdx) * wk;
+      hit = true;
+    }
+    if (ny > g.wy1 - r - wave || ny < g.wy0 + r + wave) {
+      float wy = ny > g.wy1 - r - wave ? g.wy1 - r - wave : g.wy0 + r + wave;
+      pdy += (clampf((wy - b.y[i - 1]) / seg, -1, 1) - pdy) * wk;
+      hit = true;
+    }
+    if (hit) {
+      float q = pdx * pdx + pdy * pdy;
+      if (q > 1) { q = fsqrt(q); pdx /= q; pdy /= q; q = 1; }
+      pdz = (pdz < 0 ? -1.f : 1.f) * fsqrt(1 - q);
+    }
     b.x[i] = b.x[i - 1] + pdx * seg;
     b.y[i] = b.y[i - 1] + pdy * seg;
     b.z[i] = b.z[i - 1] + pdz * seg;
@@ -212,7 +241,7 @@ static inline void drawSpinny(Canvas& c, SpinnyBody& b, float t, Mood mood, cons
 
   // ---- project the chain; a small wave runs down the body (stronger towards the tail)
   float px[N], py[N], pr[N], u[N];
-  static const float R[N] = {5.6f, 10.6f, 12.9f, 12.7f, 9.3f, 9.5f, 10.3f, 10.1f, 9.1f, 7.6f, 5.8f, 4.2f, 2.9f, 1.8f, 0.9f};
+  const float* R = SP_R;
   float amp0 = (mood == MOOD_SLEEPY ? 0.35f : 1.f) * (0.6f + 0.6f * b.tuck);
   float breathe = 1 + 0.025f * fsin(t * 1.7f) + 0.06f * squash;
   for (int i = 0; i < N; i++) {
