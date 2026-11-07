@@ -2,88 +2,78 @@
 
 [Русский](README.ru.md) · **English**
 
-A volumetric (CAL) 3D printer for the [SpinSlicer](https://github.com/redbluecarrot/SpinSlicer) slicer.
-A vial of resin spins, a projector shines frames onto it, and the whole part cures at once.
-This repository is everything the printer itself needs: the screen and motor firmware, the
-Raspberry Pi software, the angle-locked projector and a system image.
+A volumetric 3D printer. A vial of resin turns slowly, a projector shines images onto it, and
+the part sets inside all at once, with no layers. Models are prepared in the free slicer
+[SpinSlicer](https://github.com/redbluecarrot/SpinSlicer) and sent to the printer over Wi-Fi.
 
-```
- SpinSlicer / phone ──Wi-Fi──► Raspberry Pi ──HDMI──► projector
-                                   │
-                                   └──USB or 4 wires──► ESP32-S3 (screen, buttons, motor)
-```
+![the printer at work: the printer's screen and the projector image during a print](docs/demo.gif)
 
-![SpinPrinter at work: the real screen UI and the projector following the vial angle](docs/demo.gif)
+## What the printer is made of
 
-*The real firmware UI (left) through a whole print, and what the projector shows (right): the frame
-always belongs to the vial's angle, the light is on only during the exposure.*
+| part | what it does |
+|---|---|
+| **board with a screen** (ESP32-S3) | menu and buttons (or a joystick, or a rotary knob), turns the vial |
+| **Raspberry Pi** + **projector** | keeps your prints, shows the images on the vial, serves the printer's page in a browser |
+| **SpinSlicer** on a computer | turns a model into a `.spin` print file and sends it to the printer |
 
-**The main difference from OpenCAL:** the projector shows the frame for the **vial's angle**, not
-for the time. The ESP32 counts every motor step, and on every projector refresh the frame for
-the current angle goes up. The video cannot drift, and the light goes off after exactly N turns.
+Any 64-bit Raspberry Pi works: 3, 3B+, 4, 400, 5, Zero 2 W. Screens: 1.9", 1.3", 2.4" and
+2.8" (ST7789, ILI9341), 1.8" (ST7735), round 1.28" (GC9A01).
 
-## Install
+## Getting started
 
-Step by step for Windows, Mac and Linux: **[docs/INSTALL.md](docs/INSTALL.md)**. In short:
+Step by step, for Windows, Mac and Linux: **[the guide](docs/INSTALL.md)**. In short:
 
-1. **Flash the ESP32-S3:** open the [browser flasher](https://v0xeii.github.io/SpinPrinter/flasher/) in Chrome or Edge
-   → "Flash SpinScreen". No Arduino IDE needed.
-2. **Set up the Raspberry Pi:**
-   - any OS: Raspberry Pi Imager → Raspberry Pi OS Lite (64-bit) with your Wi-Fi and SSH, then one command on the Pi:
-     ```bash
-     curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash
-     ```
-   - Linux: all in one command on the computer, card in the reader: `sudo bash SpinPi/make_sd_card.sh`.
-3. **Wire** it as below, switch on and open `http://spinslicer.local`.
+1. **The board.** Plug it into your computer and open the
+   **[flasher page](https://v0xeii.github.io/SpinPrinter/flasher/)** in Chrome or Edge.
+   Press "Flash", then on the same page pick your screen and controls and press
+   "Save to the board". Without that second step the screen stays black.
+2. **Raspberry Pi.** Write Raspberry Pi OS Lite to a card with Raspberry Pi Imager, power the Pi
+   and run one command from the guide on it.
+3. **Connect** the board to the Pi with a USB cable and the projector to the Pi with HDMI, and
+   power up. When "Pi" lights up on the printer's screen, you are ready.
+
+## Printing
+
+1. In SpinSlicer, prepare the model and on the "Print" step press **"Send to printer"**. The slicer
+   finds the printer on the network by itself. No network? Save the `.spin` file to a USB stick
+   and plug it into the Pi.
+2. On the printer's screen: **Print** → pick the part → **PRINT**.
+3. When it is done, answer "Under / Good / Over": the printer adjusts the exposure for the next one.
+
+The printer's page in a browser: **http://spinslicer.local** (or the QR code: printer screen →
+Connect). Upload prints from a phone there and watch how the print goes.
 
 ## Wiring
 
 ![wiring](docs/wiring.svg)
 
-The ESP32 and the Pi talk over a **USB cable or four wires**. Both work, nothing to switch: the
-firmware listens on both and the Pi looks for the ESP on USB first, then on the wires.
+The board and the Pi connect with a USB cable (a data cable, not a charge-only one). If the screen
+is wired rather than plugged into the breadboard next to the board, four wires work instead of the
+cable: Pi pin 2 → 5V, pin 6 → GND, pin 8 → RX (GPIO44), pin 10 → TX (GPIO43). The wiring for
+your screen and controls is shown on the flasher page.
 
-| Raspberry Pi (outer header row, from the SD-card end) | ESP32-S3 Super Mini |
-|---|---|
-| pin 2 · 5V | 5V |
-| pin 6 · GND | GND |
-| pin 8 · GPIO14 TX | **RX** (GPIO44) |
-| pin 10 · GPIO15 RX | **TX** (GPIO43) |
+---
 
-TX and RX **cross**. Both boards are 3.3 V, no level shifter. The header is the same on every
-40-pin Pi. Power the Pi with the supply for its model, or it reports "Undervoltage" and misbehaves.
+## For developers
 
-**Any 64-bit Raspberry Pi works:** Pi 3, 3B+, 4, 400, 5, Zero 2 W. Power and HDMI per model:
-[docs/INSTALL.md](docs/INSTALL.md#which-raspberry-pi).
-
-## Printing from SpinSlicer over Wi-Fi
-
-In SpinSlicer, on the Print step, pick **"to printer"** → **"Send to printer"**. The slicer finds
-the printer on the network by itself (mDNS, `_spinprinter._tcp`), takes its profile (projector,
-vial, calibration) and sends one **`.spin`** file: the one-turn video, a picture of the part and
-the planned turns. You can also drop a `.spin` or a video on the printer page
-(`http://spinslicer.local`) from any device on the same network, or bring it on a USB stick.
-How the slicer and the printer work together: [docs/ecosystem.ru.md](docs/ecosystem.ru.md);
-the printer's API: [SpinPi/README.en.md](SpinPi/README.en.md#for-developers-http-api).
-
-## What is here
+Inside, the printer is a few programs:
 
 | folder | what it is |
 |---|---|
-| [`SpinScreen_v0.7/`](SpinScreen_v0.7/README.en.md) | ESP32-S3 firmware: ST7789 screen, buttons, stepper motor, Spinny the axolotl |
-| [`SpinPi/`](SpinPi/README.en.md) | the Pi software: printer web page, USB sticks, print jobs, ESP32 link, installers |
-| [`SpinProj/`](SpinProj/README.en.md) | the projector: the frame for the vial angle on every vsync (C, DRM/KMS) |
-| [`SpinOS/`](SpinOS/README.en.md) | a dedicated system image (Buildroot, Pi 3 for now), not yet tried on hardware |
-| [`flasher/`](flasher/index.html) | the browser flasher page (published on GitHub Pages) |
-| [`dev/`](#the-whole-printer-on-a-pc) | the whole printer on a PC without hardware + a self-test |
-| [`docs/plan.md`](docs/plan.md) | the project's first plan (touch panel, `.spincal` jobs), in Russian; `firmware/`, `pi/`, `system/`, `tests/` are its empty skeleton |
+| [`SpinScreen_v0.7/`](SpinScreen_v0.7/README.en.md) | the board's firmware (SpinScreen): screen, controls, motor, protocol with the Pi |
+| [`SpinPi/`](SpinPi/README.en.md) | the Raspberry Pi program (SpinPi): printer page, USB sticks, printing, HTTP API |
+| [`SpinProj/`](SpinProj/README.en.md) | projector output (SpinProj): the frame for the vial's angle on every refresh |
+| [`SpinOS/`](SpinOS/README.md) | a custom Buildroot system image, Pi 3 only so far and not tried on hardware |
+| [`flasher/`](flasher/index.html) | the board's flash and setup page (GitHub Pages) |
+| [`dev/`](dev/) | the whole printer on a computer without hardware, and the self-test |
+| [`docs/ecosystem.ru.md`](docs/ecosystem.ru.md) | how the slicer and the printer work together, the `.spin` format |
 
-## The whole printer on a PC
+**Why the images never drift.** The board counts every motor step and knows the vial's angle. The
+Raspberry Pi reads the angle 20 times a second, and the projector shows the image for that angle
+on every refresh, not by time as OpenCAL does. The light goes off exactly after N turns.
 
-No Pi, ESP32 or projector needed: the PC runs the **real screen UI** (the same code as the
-firmware), SpinPi and SpinProj.
-
-![virtual ESP32](dev/virtual_esp.png)
+**The whole printer on a computer.** No Pi, board or projector: the real screen interface (the same
+code as the firmware), the Pi program and the projector in windows.
 
 ```bash
 # Ubuntu / Debian
@@ -91,19 +81,10 @@ sudo apt install build-essential pkg-config liblz4-dev libsdl2-dev libdrm-dev ff
 # Manjaro / Arch
 sudo pacman -S --needed base-devel lz4 sdl2 libdrm ffmpeg python-pyserial
 
-python3 dev/bench.py      # screen and projector windows + the printer page in the browser
-python3 dev/selftest.py   # self-test, about 2 minutes, 22 checks
+python3 dev/bench.py      # the screen and projector windows + the printer's page in a browser
+python3 dev/selftest.py   # self-test, about 2 minutes
 ```
 
-Screen keys: ↑ ↓, Enter = OK, Esc = back. **F** in the ESP32 window makes the board "hang": the
-light must go off at once. In the test video the arrow in the corner points where the vial arrow does.
-
-## Tested and not yet tested
-
-| | |
-|---|---|
-| ✔ on a PC | ESP32 ↔ SpinPi ↔ SpinProj, angle-locked printing, faults, Wi-Fi page (self-test on every push) |
-| ✔ real ESP32 | firmware 0.7.2 on the board; SpinPi on a PC + the board over USB: no missed frames, 0.5 ms angle jitter |
-| ✔ SpinSlicer → printer | lossless video + plan → SpinPi on a PC → the print started by itself and ran to plan |
-| ✔ Buildroot | SpinOS settings accepted by Buildroot 2026.02.3, SpinProj builds for the Pi (aarch64) |
-| ✘ not yet | on a real Pi: projector output (DRM), speed, installation, the TX/RX wire link, the motor |
+**Tested:** the whole chain on a computer (self-test on every push); a real board with the Pi
+program on a PC: printing without missed frames, 0.5 ms angle jitter; SpinSlicer → printer.
+**Not yet tried on a real Pi:** projector output, installation, the wired link, the motor.
