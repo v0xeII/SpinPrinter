@@ -6,7 +6,7 @@
 //  * pixels go out through small staging buffers, byte-swapped on the way, so drawing the next
 //    frame never waits for the SPI
 //  * only what changed goes over SPI (dirty.h), so a calm screen costs almost nothing
-//  * 170x320 and 240x240 panels (config.h)
+//  * 170x320, 240x240 and 240x320 panels (config.h)
 #ifdef ARDUINO
 #include "display.h"
 
@@ -112,6 +112,9 @@ bool display_init() {
 #if TFT_PANEL == PANEL_240x240
   static const uint8_t MAD[4] = {0x00, 0x60, 0xC0, 0xA0};
   static const int OX[4] = {0, 0, 0, 80}, OY[4] = {0, 0, 80, 0};
+#elif TFT_PANEL == PANEL_240x320
+  static const uint8_t MAD[4] = {0x00, 0x60, 0xC0, 0xA0};
+  static const int OX[4] = {0, 0, 0, 0}, OY[4] = {0, 0, 0, 0};  // fills the whole controller memory
 #else
   static const uint8_t MAD[4] = {0x00, 0x60, 0xC0, 0xA0};
   static const int OX[4] = {35, 0, 35, 0}, OY[4] = {0, 35, 0, 35};
@@ -136,11 +139,18 @@ bool display_init() {
   cmd(TFT_INVERT ? 0x21 : 0x20);
   cmd(0x13);  // normal display mode
 
+  // the small buffers first, so a big panel's framebuffers can never starve them;
+  // the second framebuffer only if enough RAM stays free for the rest of the firmware
+  // (two 320x240 buffers are 300 KB)
   size_t sz = W * H * 2;
-  fbs[0] = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  fbs[1] = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
   stage[0] = (uint16_t*)heap_caps_malloc(CHUNK_PX * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
   stage[1] = (uint16_t*)heap_caps_malloc(CHUNK_PX * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+  fbs[0] = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+  fbs[1] = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+  if (fbs[1] && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 48 * 1024) {
+    heap_caps_free(fbs[1]);
+    fbs[1] = nullptr;
+  }
   if (!fbs[0] || !stage[0] || !stage[1]) return false;
   dbl = fbs[1] != nullptr;
   memset(fbs[0], 0, sz);

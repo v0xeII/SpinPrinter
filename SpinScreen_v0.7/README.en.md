@@ -62,7 +62,10 @@ average speed is exact and every step is counted. The Pi asks for the angle (`PO
 
 Buttons (one leg on the pin, the other on GND, no resistors): UP → 4, DOWN → 5, OK → 6. A long
 OK press = back / stop. A KY-040 rotary encoder works instead: CLK → 4, DT → 5, SW → 6 and
-`INPUT_MODE INPUT_ENCODER` in `config.h`. Motor driver (later): STEP → 1, DIR → 2, EN → 13, common GND.
+`INPUT_MODE INPUT_ENCODER` in `config.h`. Or a KY-023 joystick (5 pins): GND → GND, **+5V → 3V3**
+(not 5V), VRx → 4, VRy → 5, SW → 6 and `INPUT_MODE INPUT_JOYSTICK`: up/down = the list, right or
+press = OK, left or long press = back; the centre is taken at power-up, so leave the stick alone then;
+directions swapped → `JOY_SWAP_XY`, `JOY_INVERT_Y`, `JOY_INVERT_X`. Motor driver (later): STEP → 1, DIR → 2, EN → 13, common GND.
 The Raspberry Pi: USB cable, or wires as in the [wiring diagram](../docs/wiring.svg).
 
 ## Flashing
@@ -78,7 +81,8 @@ hold BOOT, press and release RESET, release BOOT, Upload again.
 ## Which screen
 
 One line in `config.h`: `#define TFT_PANEL PANEL_170x320` (1.9" wide) or `PANEL_240x240`
-(1.3" / 1.54" square). The UI rearranges itself. Odd picture: colours inverted → `TFT_INVERT 0`;
+(1.3" / 1.54" square) or `PANEL_240x320` (2.0" / 2.4" / 2.8", e.g. GMT024-08-SPI8P, same 8 pins).
+The UI rearranges itself. Odd picture: colours inverted → `TFT_INVERT 0`;
 upside down → another `TFT_ROTATION`; shifted or a garbage stripe → `TFT_OFFSET_X` / `TFT_OFFSET_Y`
 (0, 35 or 80); square module without CS → `PIN_TFT_CS -1` and `TFT_SPI_MODE 3`.
 
