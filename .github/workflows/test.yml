@@ -8,6 +8,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: one version everywhere (dev/version.py)
+        run: python3 dev/version.py
       - name: packages
         run: |
           sudo apt-get update

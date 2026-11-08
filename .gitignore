@@ -27,3 +27,8 @@ buildroot-*/
 
 # local editor notes
 CLAUDE.md
+
+# the flasher's firmware and pictures: built by CI from the latest release (docs/RELEASING.md)
+flasher/fw/
+flasher/wiring.svg
+flasher/wiring.ru.svg

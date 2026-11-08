@@ -1,7 +1,13 @@
 # Builds the SpinScreen firmware (ESP32-S3) and publishes the browser flasher on GitHub Pages:
 #   https://v0xeii.github.io/SpinPrinter/flasher/   (Chrome/Edge, Windows/Linux/Mac, no Arduino IDE)
 # One-time setup in the repository: Settings -> Pages -> Source: GitHub Actions.
-# A tag v* also attaches the firmware files to a GitHub release.
+#
+# A release is a tag vX.Y.Z on a commit of main whose files all say X.Y.Z (docs/RELEASING.md):
+#  * every push and pull request: the firmware compiles and the versions agree (dev/version.py);
+#  * a tag: the same, plus the tag must be on main; the merged image goes to the GitHub release
+#    and the flasher is published again;
+#  * the flasher always flashes the LATEST RELEASE, not whatever main has today. The flasher, the
+#    release page and SpinPi's get.sh (which installs the latest release on the Pi) agree.
 name: firmware
 on:
   push:
@@ -12,15 +18,30 @@ on:
 env:
   ESP32_CORE: "3.3.8"   # 3.3.10: its esp-rv32 toolchain download kept failing (504)
   FQBN: "esp32:esp32:esp32s3:CDCOnBoot=cdc"
+  CORE_INDEX: https://espressif.github.io/arduino-esp32/package_esp32_index.json
 jobs:
   build:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # the release
+      actions: write    # publish the flasher again after a release
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # a tag must be on main: needs the history
+      - name: one version everywhere
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            python3 dev/version.py --tag "$GITHUB_REF_NAME"
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+              || { echo "::error::$GITHUB_REF_NAME is not on main: tag a commit of main"; exit 1; }
+          else
+            python3 dev/version.py
+          fi
       - uses: arduino/setup-arduino-cli@v2
       - name: ESP32 core
         run: |
-          arduino-cli config init --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli config init --additional-urls "$CORE_INDEX"
           arduino-cli core update-index
           # Espressif's download server answers 504 now and then: try again before giving up
           for i in 1 2 3 4 5; do
@@ -30,14 +51,62 @@ jobs:
           done
       - name: compile
         run: arduino-cli compile --fqbn "$FQBN" --build-path build SpinScreen_v0.7/SpinScreen
-      - name: flasher site (page + firmware parts + manifest)
+      - name: release files (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # the same files as flasher/ in the repo (bash SpinScreen_v0.7/tools/update_flasher.sh),
-          # but with the firmware just built here; served at /flasher/ and, for Actions-mode Pages, at /
-          rm -rf site && mkdir -p site
-          cp -r flasher site/flasher
+          BIN="spinscreen-${GITHUB_REF_NAME}-merged.bin"
+          cp build/SpinScreen.ino.merged.bin "$BIN"
+          NOTES="SpinScreen firmware ${GITHUB_REF_NAME#v}. Flash it from the browser at https://v0xeii.github.io/SpinPrinter/flasher/ or write the merged image at 0x0. Wiring: docs/INSTALL.md of this release. The Pi: get.sh installs this release."
+          gh release create "$GITHUB_REF_NAME" "$BIN" --verify-tag --title "SpinPrinter $GITHUB_REF_NAME" --notes "$NOTES" \
+            || gh release upload "$GITHUB_REF_NAME" "$BIN" --clobber
+          # the flasher follows the latest release: build it again from main's workflow
+          # (Pages only accepts deployments from main)
+          gh workflow run firmware.yml --ref main
+
+  pages:
+    # main only (a push, or the run a release starts): the flasher with the LATEST RELEASE
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: the latest release
+        id: rel
+        run: |
+          TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          [ -n "$TAG" ] || { echo "::error::no release tag yet"; exit 1; }
+          git checkout -q "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "flasher: $TAG ($(git rev-parse --short HEAD))"
+      - uses: arduino/setup-arduino-cli@v2
+      - name: ESP32 core
+        run: |
+          arduino-cli config init --additional-urls "$CORE_INDEX"
+          arduino-cli core update-index
+          for i in 1 2 3 4 5; do
+            arduino-cli core install "esp32:esp32@$ESP32_CORE" && break
+            [ "$i" = 5 ] && exit 1
+            echo "core install failed, retry $i in $((i * 30)) s"; sleep $((i * 30))
+          done
+      - name: compile ${{ steps.rel.outputs.tag }}
+        run: arduino-cli compile --fqbn "$FQBN" --build-path build SpinScreen_v0.7/SpinScreen
+      - name: flasher site (page + wiring + firmware parts + manifest, all from the release)
+        run: |
+          # served at /flasher/ and, for Actions-mode Pages, at /
+          rm -rf site && mkdir -p site/flasher/fw
+          cp flasher/index.html flasher/manifest.json site/flasher/
           cp docs/wiring.svg docs/wiring.ru.svg site/flasher/
-          mkdir -p site/flasher/fw
           cp build/SpinScreen.ino.bootloader.bin site/flasher/fw/bootloader.bin
           cp build/SpinScreen.ino.partitions.bin site/flasher/fw/partitions.bin
           cp build/SpinScreen.ino.bin site/flasher/fw/spinscreen.bin
@@ -47,41 +116,9 @@ jobs:
           python3 -m json.tool site/flasher/manifest.json > /dev/null
           cp -r site/flasher/. site/
           cp build/SpinScreen.ino.merged.bin site/spinscreen-merged.bin
-          # the committed flasher/ must match the source: a reminder, not a failure
-          cmp -s build/SpinScreen.ino.bin flasher/fw/spinscreen.bin || echo "::warning::flasher/fw is older than the firmware source: run SpinScreen_v0.7/tools/update_flasher.sh and commit"
           ls -la site site/flasher/fw
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
-      - name: release files (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cp site/spinscreen-merged.bin "spinscreen-${GITHUB_REF_NAME}-merged.bin"
-          gh release create "$GITHUB_REF_NAME" "spinscreen-${GITHUB_REF_NAME}-merged.bin" --title "SpinPrinter $GITHUB_REF_NAME" \
-            --notes "SpinScreen firmware: flash from the browser at https://v0xeii.github.io/SpinPrinter/flasher/ or write the merged image at 0x0." \
-            || gh release upload "$GITHUB_REF_NAME" "spinscreen-${GITHUB_REF_NAME}-merged.bin" --clobber
-    permissions:
-      contents: write
-  pages:
-    # Pages set to "GitHub Actions": publish this build. Set to "Deploy from a branch": GitHub
-    # publishes main by itself (flasher/ is committed), so nothing to do here.
-    if: github.ref == 'refs/heads/main'
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: mode
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: echo "type=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .build_type 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
       - id: deploy
-        if: steps.mode.outputs.type != 'legacy'
-        continue-on-error: true  # the mode could not be read and Pages is in branch mode: not an error
         uses: actions/deploy-pages@v4

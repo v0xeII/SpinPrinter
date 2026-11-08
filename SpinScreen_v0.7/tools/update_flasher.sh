@@ -1,7 +1,9 @@
 #!/bin/bash
-# Build the firmware and put it, with its manifest, next to the browser flasher (flasher/fw/).
-# GitHub Pages then serves it at https://v0xeii.github.io/SpinPrinter/flasher/ . Run it after
-# changing the firmware, before committing:   bash SpinScreen_v0.7/tools/update_flasher.sh
+# Build the firmware and put it, with its manifest, next to the browser flasher (flasher/fw/),
+# to try the flasher page locally (serve flasher/ over https or localhost):
+#     bash SpinScreen_v0.7/tools/update_flasher.sh
+# Nothing here is committed: the published flasher is built by .github/workflows/firmware.yml
+# from the latest release tag (docs/RELEASING.md).
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/../.."
 CLI="$(command -v arduino-cli || true)"
