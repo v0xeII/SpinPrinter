@@ -47,22 +47,22 @@ average speed is exact and every step is counted. The Pi asks for the angle (`PO
 |---|---|
 | GND | GND |
 | VCC | **3V3** (not 5V) |
-| SCL | 12 |
-| SDA | 11 |
-| RES | 8 |
-| DC | 9 |
-| CS | 10 |
-| BLK | 7 |
+| SCL | 43 (TX) |
+| SDA | 44 (RX) |
+| RES | 1 |
+| DC | 2 |
+| CS | 3 |
+| BLK | 4 |
 
 | KY-023 joystick | ESP32-S3 |
 |---|---|
 | GND | GND |
 | +5V | **3V3** (not 5V: that would put more than 3.3 V on the ESP's inputs) |
-| VRx | 4 |
-| VRy | 5 |
-| SW | 6 |
+| VRx | 13 |
+| VRy | 11 |
+| SW | 12 |
 
-TMC2209 motor driver: STEP → 1, DIR → 2, EN → 13, plus a common GND with the ESP32; the motor has its own 12–24 V supply.
+TMC2209 motor driver: STEP → 5, DIR → 6, EN → 7, plus a common GND with the ESP32; the motor has its own 12–24 V supply.
 
 To the Raspberry Pi: a USB cable that carries data (the board's USB-C to any Pi USB port).
 

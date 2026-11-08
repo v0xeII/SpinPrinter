@@ -73,11 +73,11 @@ installs the printer software by itself on the first start: 10–20 minutes, kee
 ![wiring](wiring.svg)
 
 - **Board ↔ Pi:** a USB cable (the board's USB-C to any Pi USB port).
-- **Screen ST7789 2.4":** SCL→12, SDA→11, RES→8, DC→9, CS→10, BLK→7, VCC→3V3 (not 5V!), GND.
-- **Joystick KY-023:** VRx→4, VRy→5, SW→6, +5V→3V3 (not 5V!), GND.
+- **Screen ST7789 2.4":** SCL→43, SDA→44, RES→1, DC→2, CS→3, BLK→4, VCC→3V3 (not 5V!), GND.
+- **Joystick KY-023:** VRx→13, VRy→11, SW→12, +5V→3V3 (not 5V!), GND.
 - **Projector:** HDMI to the Pi.
 - **Pi power:** the supply for your model (table above). A phone charger with a thin cable often gives "Undervoltage".
-- **Motor:** TMC2209 driver: STEP→1, DIR→2, EN→13, common GND; the motor has its own 12–24 V supply.
+- **Motor:** TMC2209 driver: STEP→5, DIR→6, EN→7, common GND; the motor has its own 12–24 V supply.
 
 Wire everything with the power off.
 

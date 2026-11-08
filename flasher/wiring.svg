@@ -49,11 +49,11 @@
   <text x="893" y="172" font-size="18" font-weight="800" fill="#f7e3ec" text-anchor="middle">ESP32-S3 Super Mini</text>
   <text x="893" y="192" font-size="12" fill="#a88f9b" text-anchor="middle">pins are GPIO numbers</text>
   <g font-size="14" fill="#f7e3ec">
-    <text x="1004" y="236" text-anchor="end">12 · 11 · 10 · 9 · 8 · 7</text>
+    <text x="1004" y="236" text-anchor="end">43 · 44 · 1 · 2 · 3 · 4</text>
     <text x="1004" y="254" text-anchor="end" fill="#a88f9b" font-size="12">screen</text>
-    <text x="1004" y="300" text-anchor="end">4 · 5 · 6</text>
+    <text x="1004" y="300" text-anchor="end">13 · 11 · 12</text>
     <text x="1004" y="318" text-anchor="end" fill="#a88f9b" font-size="12">joystick</text>
-    <text x="1004" y="364" text-anchor="end">1 · 2 · 13</text>
+    <text x="1004" y="364" text-anchor="end">5 · 6 · 7</text>
     <text x="1004" y="382" text-anchor="end" fill="#a88f9b" font-size="12">motor driver</text>
     <text x="1004" y="428" text-anchor="end">3V3 · GND</text>
     <text x="1004" y="446" text-anchor="end" fill="#a88f9b" font-size="12">screen + joystick power</text>
@@ -68,17 +68,17 @@
   <g>
     <rect x="490" y="620" width="550" height="56" rx="12" fill="#151016" stroke="#2a2029"/>
     <text x="510" y="644" font-size="15" font-weight="700" fill="#ff8db5">Screen ST7789 2.4″ 240×320</text>
-    <text x="510" y="664" font-size="13" fill="#f7e3ec">SCL→12  SDA→11  RES→8  DC→9  CS→10  BLK→7  VCC→3V3 (not 5V!)  GND→GND</text>
+    <text x="510" y="664" font-size="13" fill="#f7e3ec">SCL→43  SDA→44  RES→1  DC→2  CS→3  BLK→4  VCC→3V3 (not 5V!)  GND→GND</text>
     <circle cx="1060" cy="648" r="5" fill="#4a3b44"/>
 
     <rect x="490" y="684" width="576" height="56" rx="12" fill="#151016" stroke="#2a2029"/>
     <text x="510" y="708" font-size="15" font-weight="700" fill="#ff8db5">Joystick KY-023</text>
-    <text x="510" y="728" font-size="13" fill="#f7e3ec">VRx→4  VRy→5  SW→6  +5V→3V3 (not 5V!)  GND→GND</text>
+    <text x="510" y="728" font-size="13" fill="#f7e3ec">VRx→13  VRy→11  SW→12  +5V→3V3 (not 5V!)  GND→GND</text>
     <circle cx="1086" cy="712" r="5" fill="#4a3b44"/>
 
     <rect x="490" y="748" width="602" height="56" rx="12" fill="#151016" stroke="#2a2029"/>
     <text x="510" y="772" font-size="15" font-weight="700" fill="#ff8db5">TMC2209 + NEMA17</text>
-    <text x="510" y="792" font-size="13" fill="#f7e3ec">STEP→1  DIR→2  EN→13  common GND;  VM: its own 12–24 V supply</text>
+    <text x="510" y="792" font-size="13" fill="#f7e3ec">STEP→5  DIR→6  EN→7  common GND;  VM: its own 12–24 V supply</text>
     <circle cx="1112" cy="776" r="5" fill="#4a3b44"/>
   </g>
 
