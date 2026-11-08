@@ -523,6 +523,55 @@ class Api(Tmp):
         again = spinpi.Printer(FakeEsp(), FakeSpinProj(), self.pr.lib, self.pr.data, 1280, 800, FakeWarm())
         self.assertEqual(again.settings["printer_id"], pid)
 
+    # ---- a print sent from SpinSlicer starts only after a yes on the printer's screen
+    def ask(self):
+        self.req("PUT", "/api/files/c.spin", spin_bytes())
+        code, r, _ = self.req("POST", "/api/print", {"id": "lib/c.spin", "confirm": True})
+        self.assertEqual(code, 200, r)
+        self.assertTrue(r["ok"], r)
+        return r
+
+    def test_print_waits_for_the_screen(self):
+        r = self.ask()
+        self.assertEqual(r["request"]["state"], "waiting_confirm")
+        self.assertEqual(self.pr.state, "idle")  # nothing turns or shines yet
+        ask = [x for x in self.pr.esp.sent if x.startswith("ASK ")]
+        self.assertEqual(ask, ["ASK 5 200 c.spin"])  # 5 turns of 40 s, the name
+        code, st, _ = self.req("GET", "/api/state")
+        self.assertEqual(st["request"]["state"], "waiting_confirm")
+        self.assertEqual(st["request"]["name"], "c.spin")
+        self.pr.on_esp_event("GO")
+        self.assertEqual(wait_state(self.pr, ("done", "error")), "done", self.pr.msg)
+        code, st, _ = self.req("GET", "/api/state")
+        self.assertEqual(st["request"]["state"], "started")
+
+    def test_print_refused_on_the_screen(self):
+        self.ask()
+        self.pr.on_esp_event("NO")
+        self.assertEqual(self.pr.request["state"], "cancelled")
+        self.pr.on_esp_event("GO")  # a late yes starts nothing
+        time.sleep(0.1)
+        self.assertEqual(self.pr.state, "idle")
+
+    def test_unanswered_request_expires(self):
+        self.ask()
+        self.pr.ASK_TIMEOUT_S = 0.0
+        self.pr.expire_request()
+        self.assertEqual(self.pr.request["state"], "expired")
+        self.assertIn("ASK END", self.pr.esp.sent)
+
+    def test_confirm_needs_the_screen(self):
+        self.req("PUT", "/api/files/c.spin", spin_bytes())
+        self.pr.esp.connected = False
+        code, r, _ = self.req("POST", "/api/print", {"id": "lib/c.spin", "confirm": True})
+        self.assertEqual(code, 409)
+        self.assertFalse(r["ok"])
+
+    def test_bad_request_is_refused_at_once(self):
+        code, r, _ = self.req("POST", "/api/print", {"id": "lib/nothing.spin", "confirm": True})
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["error"], "no such video")
+
     def test_history(self):
         self.req("PUT", "/api/files/c.spin", spin_bytes())
         code, r, _ = self.req("POST", "/api/print", {"id": "lib/c.spin", "revs": 3, "factor": 1.1})
