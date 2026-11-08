@@ -37,7 +37,7 @@ except ImportError:  # still serve the web page without the ESP
     serial = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "0.8.3"
+VERSION = "0.8.4"
 VIDEO_EXT = (".mp4", ".mkv", ".mov", ".avi", ".webm")
 SPIN_EXT = ".spin"  # SpinSlicer's one-file print: a stored ZIP with spin.json, video.mp4, preview.png
 PRINT_EXT = VIDEO_EXT + (SPIN_EXT,)
