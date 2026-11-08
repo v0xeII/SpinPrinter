@@ -57,7 +57,8 @@ press and release **RESET**, release BOOT and try again.
    curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash
    ```
    It installs the printer software, keeps the projector black until a print and gets the Pi ready
-   for the board. Run the same command again any time to update.
+   for the board. It takes the latest release, the same version the flasher puts on the board.
+   Run the same command again any time to update.
 
 ### Way B: Linux, one command on the computer
 With the card in the reader, from the SpinPrinter folder:

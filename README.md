@@ -65,6 +65,7 @@ Inside, the printer is a few programs:
 | [`flasher/`](flasher/index.html) | the board's flash and setup page (GitHub Pages) |
 | [`dev/`](dev/) | the whole printer on a computer without hardware, and the self-test |
 | [`docs/ecosystem.ru.md`](docs/ecosystem.ru.md) | how the slicer and the printer work together, the `.spin` format |
+| [`docs/RELEASING.md`](docs/RELEASING.md) | how a release is made: one version, one tag on main |
 
 **Why the images never drift.** The board counts every motor step and knows the vial's angle. The
 Raspberry Pi reads the angle 20 times a second, and the projector shows the image for that angle
