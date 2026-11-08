@@ -20,7 +20,7 @@ static MotorConfig toMotor(const Settings& s) {
   return MotorConfig{s.stepsRev, s.micro, s.gear, s.accel, s.dirInv != 0};
 }
 // The Pi is on the USB cable.
-static char rxBuf[160];
+static char rxBuf[128];  // = Line::s: a longer line is dropped, never cut
 static int rxN = 0;
 static bool rxJunk = false;  // this line had bytes no Pi sends: dropped
 
@@ -98,7 +98,10 @@ static void handleLine(const char* buf) {
   Line l;
   strncpy(l.s, buf, sizeof l.s);
   l.s[sizeof l.s - 1] = 0;
-  xQueueSend(lines, &l, 0);
+  // A file list (FL BEGIN, up to 32 files, FL END) comes in one burst, faster than the UI takes
+  // lines while it draws a frame. Wait for room rather than drop a line: the UI empties the
+  // queue at least once a frame, and POS (the time-critical one) was answered above already.
+  if (xQueueSend(lines, &l, pdMS_TO_TICKS(40)) != pdTRUE) sendLine("ERR screen busy: line dropped");
 }
 
 static void serialTask(void*) {
@@ -111,6 +114,7 @@ static void serialTask(void*) {
       if (ch != '\n') {
         if (ch < 0x20 && ch != '\t') rxJunk = true;
         if (rxN < (int)sizeof(rxBuf) - 1) rxBuf[rxN++] = (char)ch;
+        else rxJunk = true;  // too long for the buffer: never run a cut-off command
         continue;
       }
       rxBuf[rxN] = 0;
@@ -142,7 +146,7 @@ void setup() {
 
   motor_init(toMotor(s), PIN_STEP, PIN_DIR, PIN_EN);
   input_init();
-  lines = xQueueCreate(16, sizeof(Line));
+  lines = xQueueCreate(24, sizeof(Line));
   txq = xQueueCreate(24, sizeof(Line));
   haveScreen = display_init();
   if (haveScreen) {

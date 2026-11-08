@@ -39,6 +39,7 @@ enum Str {
   // customisation
   S_CARD_PICK, S_HOME_CARD, S_HOME_AXO,
   S_STOP_AGAIN, S_ASK_TITLE, S_ASK_FROM, S_ASK_STARTING, S_ASK_NO,
+  S_DONE_HINT,
   S_COUNT
 };
 
@@ -68,6 +69,7 @@ static const char* const STR[2][S_COUNT] = {
         "Кастомизация", "Главная", "Окраска", "Розовый", "Золотой", "Дикий", "Чёрный", "Голубой", "Радуга RGB",
         "выбрать видео", "Карточка", "Аксолотль",
         "← ещё раз — стоп", "Печатать?", "из SpinSlicer", "Запускаю…", "Печать отменена",
+        "↑↓ выбор · → ответ · ← пропуск",
     },
     {
         "Print", "Connect", "Service",
@@ -94,5 +96,6 @@ static const char* const STR[2][S_COUNT] = {
         "Customize", "Home", "Colour", "Pink", "Golden", "Wild", "Black", "Blue", "Rainbow RGB",
         "choose a video", "Card", "Axolotl",
         "← again = stop", "Print?", "from SpinSlicer", "Starting…", "Print cancelled",
+        "↑↓ choose · → answer · ← skip",
     },
 };

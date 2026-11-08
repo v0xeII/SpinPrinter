@@ -139,7 +139,7 @@ static bool qrOk = false;
 
 // video list from the Pi
 struct FileEntry { char name[64]; float rpm; bool usb; float planRevs; float tol; float revS; bool cadOk; };
-static const int MAX_FILES = 16;
+static const int MAX_FILES = 32;  // SpinPi sends at most this many
 static FileEntry files[MAX_FILES];
 static int nFiles = 0, nIncoming = 0;
 static bool listing = false;
@@ -650,7 +650,9 @@ void ui_key(Key k, uint32_t nowMs) {
       else if (k == K_BACK) { H.send("EV NO"); go(SC_MENU); say(T(S_ASK_NO)); }
       break;
     case SC_DONE:
-      if (k == K_UP || k == K_DOWN) {  // left / right through the three answers
+      // the three answers are a column: ↑↓ choose, → sends the one lit up, ← skips. (They were a
+      // row chosen with ↑↓: pushing right to reach "Over" sent "Good" at once.)
+      if (k == K_UP || k == K_DOWN) {
         int n = doneSel + (k == K_DOWN ? 1 : -1);
         if (n >= 0 && n <= 2) doneSel = n;
         else hop(-2);
@@ -1282,15 +1284,19 @@ static void drawDone(Canvas& c, float dx, float ca, float dt) {
   }
   static const Str OPT[3] = {S_R_UNDER, S_R_OK, S_R_OVER};
   int x = (int)(LIST_X + 20 + dx);
-  c.text(F_LG, x, 64, T(S_DONE), PINK, ca);
-  c.text(F_SM, x, 86, T(S_HOW), LIGHT, ca * 0.85f);
-  float pw = (L.W - 16 - 12) / 3.f, by = 124;
+  c.text(F_LG, x, 60, T(S_DONE), PINK, ca);
+  c.text(F_SM, x, 82, T(S_HOW), LIGHT, ca * 0.85f);
+  float bx = LIST_X + 12 + dx, pw = L.W - 8 - (LIST_X + 12), ph = 28, by = 98;
   for (int i = 0; i < 3; i++) {  // the answer moves the exposure correction for the next print
-    float bx = 8 + i * (pw + 6) + dx;
+    float y = by + i * (ph + 6);
     bool on = i == doneSel;
-    c.fillRoundRect(bx, by, pw, 30, 15, on ? PINK : PANEL, ca);
-    c.textCentered(F_SM, (int)(bx + pw / 2), (int)by + 20, T(OPT[i]), on ? DARK : LIGHT, ca);
+    c.fillRoundRect(bx, y, pw, ph, ph / 2, on ? PINK : PANEL, ca);
+    c.text(F_SM, (int)(bx + 14), (int)y + 19, T(OPT[i]), on ? DARK : LIGHT, ca);
+    if (on) c.textRight(F_SM, (int)(bx + pw - 14), (int)y + 19, "→", DARK, ca);
   }
+  char h[64];
+  fitText(F_SM, HT(S_DONE_HINT), h, sizeof h, L.W - x - 4);
+  c.text(F_SM, x, L.H - 8, h, FAINT, ca * 0.8f);
 }
 
 // A print sent from SpinSlicer: what it is, and the big pink yes (→) or no (←)
