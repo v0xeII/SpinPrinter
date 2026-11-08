@@ -69,10 +69,37 @@ def save_json(path, obj, **kw):
 
 
 # =============================================================================== ESP32 link
+class Lines:
+    """Bytes from the serial port -> whole lines. A read can stop in the middle of a line (USB
+    hands over what it has); the rest waits here for its newline instead of being parsed as two
+    broken lines. A line that never ends (noise) is dropped rather than growing forever."""
+
+    MAX = 1024
+
+    def __init__(self):
+        self.buf = bytearray()
+        self.junk = False
+
+    def feed(self, data):
+        out = []
+        for b in data:
+            if b == 0x0A:
+                if not self.junk:
+                    line = self.buf.decode("utf-8", "replace").strip()
+                    if line:
+                        out.append(line)
+                self.buf.clear()
+                self.junk = False
+            elif len(self.buf) < self.MAX:
+                self.buf.append(b)
+            else:
+                self.junk = True
+        return out
+
+
 class Esp:
-    """Line protocol over serial (see SpinScreen README): the USB cable or three wires to the Pi's
-    UART (GPIO14/15 = /dev/serial0). Every candidate port is tried in turn until one answers PING,
-    and if the ESP goes quiet the search starts again, so moving from wires to cable just works."""
+    """Line protocol over the USB cable (see SpinScreen README). Every ESP port is tried in turn
+    until one answers PING, and if the ESP goes quiet the search starts again."""
 
     SILENT_S = 3.0  # no PONG for this long: not (or no longer) the ESP's port
 
@@ -94,16 +121,11 @@ class Esp:
     def _candidates(self):
         if self.port_hint:  # --serial: one port, or several separated by commas
             return [p for p in self.port_hint.split(",") if p]
+        # USB only: the Pi's UART (/dev/serial0) never has the ESP on it, and trying it after a
+        # quiet moment used to cost a running print 3 s of silence
         usb = sorted(glob.glob("/dev/serial/by-id/*Espressif*"))
         real = {os.path.realpath(p) for p in usb}
-        usb += [p for p in sorted(glob.glob("/dev/ttyACM*")) if os.path.realpath(p) not in real]
-        # Raspberry Pi GPIO14/15: /dev/serial0 on Pi 3/4/Zero 2 W with Raspberry Pi OS; ttyAMA0 on
-        # SpinOS and on a Pi 5 (where serial0 is the debug connector). Each real port once.
-        wires = []
-        for p in ("/dev/serial0", "/dev/ttyAMA0"):
-            if os.path.exists(p) and os.path.realpath(p) not in {os.path.realpath(w) for w in wires + usb}:
-                wires.append(p)
-        return usb + wires
+        return usb + [p for p in sorted(glob.glob("/dev/ttyACM*")) if os.path.realpath(p) not in real]
 
     def _find_port(self):
         cands = self._candidates()
@@ -134,6 +156,7 @@ class Esp:
                 try:
                     self.ser = serial.Serial(port, 115200, timeout=0.05)
                     self.ser.reset_input_buffer()
+                    lines = Lines()
                     self.port, opened = port, time.monotonic()
                     self.last_pong = 0.0
                     self.hello()
@@ -146,9 +169,8 @@ class Esp:
                 if time.time() - last_ping > 1:
                     self.send("PING")
                     last_ping = time.time()
-                raw = self.ser.readline()
-                if raw:
-                    self._handle(raw.decode("utf-8", "replace").strip())
+                for line in lines.feed(self.ser.read(max(1, self.ser.in_waiting))):
+                    self.on_line(line)
                 quiet = time.monotonic() - max(self.last_pong, opened)
                 if quiet > self.SILENT_S:  # nobody answers PING here: try the next port
                     if self.connected:
@@ -171,6 +193,13 @@ class Esp:
     def hello(self):
         for line in list(self.greeting):
             self.send(line)
+
+    def on_line(self, line):
+        """One whole line. A line that does not parse is logged and skipped: the link stays up."""
+        try:
+            self._handle(line)
+        except (ValueError, IndexError) as e:
+            log("ESP: bad line", repr(line[:80]), e)
 
     def _handle(self, line):
         if line.startswith("POS "):
@@ -1032,6 +1061,7 @@ class Printer:
         self.sync_ms = None
         self.drops = 0
         self.stop_flag = threading.Event()
+        self.stop_reason = ""  # who stopped the last print: shown on the page and in the log
         self.motor_rpm = 0.0
         self.motor_angle = 0.0
         self.pattern = "black"
@@ -1183,10 +1213,14 @@ class Printer:
                         format=f.get("format", "video"), plan=f.get("plan") if isinstance(f.get("plan"), dict) else None,
                         resin=f.get("resin"), printer_profile_id=f.get("printer_profile_id"))
         self.stop_flag.clear()
+        self.stop_reason = ""
         threading.Thread(target=self._run_angle if self.angle_mode else self._run, daemon=True).start()
         return None
 
-    def stop(self):
+    def stop(self, reason="со страницы принтера"):
+        if self.busy() and not self.stop_flag.is_set():
+            log("print stop:", reason)
+        self.stop_reason = reason
         self.stop_flag.set()
 
     def motor(self, on, rpm=None):
@@ -1284,7 +1318,7 @@ class Printer:
             if err:
                 self.esp.send(f"STATE ERROR {err}")
         elif p[0] == "STOP":
-            self.stop()
+            self.stop("с экрана принтера")
         elif p[0] == "RESULT" and len(p) > 1:
             pct = self.result(p[1])
             if pct is not None:
@@ -1296,7 +1330,7 @@ class Printer:
         elif p[0] == "VIALW" and len(p) > 1:
             self.calibrate(vial=int(p[1]))
         elif p[0] in ("REBOOT", "POWEROFF"):
-            self.stop()
+            self.stop("перезагрузка" if p[0] == "REBOOT" else "выключение")
             self.proj.black()
             self.esp.send("MSG " + ("Перезагружаюсь…" if p[0] == "REBOOT" else "Выключаюсь… подожди 20 с"))
             if os.geteuid() == 0:
@@ -1383,9 +1417,9 @@ class Printer:
             self.proj.black()
             e.send("SPIN 0")
             e.send("STATE IDLE")
-            self.state = "idle"
+            self.state, self.msg = "idle", "остановлено " + (self.stop_reason or "")
         except Exception as ex:  # noqa: BLE001
-            log("print error:", ex)
+            log("print error:", ex, "| turn", j.get("turn"), "of", j.get("revs"))
             self.proj.black()
             e.send("SPIN 0")
             e.send(f"STATE ERROR {str(ex)[:40]}")
@@ -1500,9 +1534,9 @@ class Printer:
             pr.black()
             e.send("SPIN 0")
             e.send("STATE IDLE")
-            self.state = "idle"
+            self.state, self.msg = "idle", "остановлено " + (self.stop_reason or "")
         except Exception as ex:  # noqa: BLE001
-            log("print error:", ex)
+            log("print error:", ex, "| turn", j.get("turn"), "of", j.get("revs"))
             pr.stop()
             pr.black()
             e.send("SPIN 0")

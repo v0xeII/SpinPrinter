@@ -538,6 +538,52 @@ class Api(Tmp):
         self.assertEqual(e["n"], 1)
 
 
+# ------------------------------------------------------------------------------------------ ESP link
+class EspLink(unittest.TestCase):
+    """Prints stopped by themselves: a line from the ESP read in two halves crashed the reader,
+    the port was closed and the print ended with "ESP не отвечает"."""
+
+    def test_lines_come_whole(self):
+        r = spinpi.Lines()
+        self.assertEqual(r.feed(b"POS 12.5 1.5"), [])
+        self.assertEqual(r.feed(b"00 1\r\nPONG SpinScreen 0.8.0\nEV ST"), ["POS 12.5 1.500 1", "PONG SpinScreen 0.8.0"])
+        self.assertEqual(r.feed(b"OP\n"), ["EV STOP"])
+
+    def test_endless_line_is_dropped(self):
+        r = spinpi.Lines()
+        self.assertEqual(r.feed(b"x" * 5000), [])
+        self.assertEqual(r.feed(b"\nPONG a\n"), ["PONG a"])
+
+    def test_bad_line_does_not_drop_the_port(self):
+        esp = spinpi.Esp.__new__(spinpi.Esp)  # no reader thread
+        esp.pos_cv, esp.pos, esp.connected, esp.greeting = threading.Condition(), None, False, []
+        esp.on_event, esp.port, esp.ser, esp.lock = (lambda ev: None), "/dev/ttyACM0", None, threading.Lock()
+        for bad in ("POS 12.5", "POS a b c", "POS", "PONG"):
+            esp.on_line(bad)  # must not raise
+        esp.on_line("POS 1.0 2.0 1")
+        self.assertEqual(esp.pos[:3], (1.0, 2.0, True))
+
+    def test_usb_only(self):
+        esp = spinpi.Esp.__new__(spinpi.Esp)
+        esp.port_hint = ""
+        real_glob, real_exists = spinpi.glob.glob, spinpi.os.path.exists
+        spinpi.glob.glob = lambda pat: ["/dev/ttyACM0"] if "ttyACM" in pat else []
+        spinpi.os.path.exists = lambda p: True
+        try:
+            self.assertEqual(esp._candidates(), ["/dev/ttyACM0"])
+        finally:
+            spinpi.glob.glob, spinpi.os.path.exists = real_glob, real_exists
+
+
+class StopReason(Tmp):
+    def test_stop_from_the_screen_is_said(self):
+        pr, _ = make_printer(self.tmp)
+        pr.job, pr.state = {"file": "x"}, "print"
+        pr.on_esp_event("STOP")
+        self.assertTrue(pr.stop_flag.is_set())
+        self.assertIn("экран", pr.stop_reason)
+
+
 # ------------------------------------------------------------------------------------------ mDNS
 class MdnsTest(Tmp):
     def test_service_file(self):
