@@ -9,7 +9,7 @@ scan it with a phone, the printer page opens, you drop a video from SpinSlicer o
 ```
  phone / PC ──Wi-Fi──► Raspberry Pi ──HDMI──► projector
                              │
-                             └──USB or 4 wires──► ESP32-S3 (screen, buttons, motor)
+                             └──USB cable──► ESP32-S3 (screen, joystick, motor)
 ```
 
 **Frames by angle (since 0.5).** The ESP32 counts every motor step and knows the vial angle.
@@ -40,7 +40,7 @@ SpinPi and SpinProj by itself on the first start (10–20 minutes, needs interne
    ```
    curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash
    ```
-4. Connect the ESP32 (USB cable **or** 4 wires, see the [wiring diagram](../docs/wiring.svg)) and the
+4. Connect the ESP32 (USB cable, see the [wiring diagram](../docs/wiring.svg)) and the
    projector (HDMI). The ESP screen → **Connect** shows the QR code with the address.
 
 ## Printing
@@ -132,6 +132,7 @@ Keep resin out of the light!
 | `POST /api/printer` `{"name":"Lab","vial_diameter_mm":25,"motor_dir":"cw_from_top"}` | edit the profile (also `irradiance_mw_cm2`, `contrast`, `vial_wall_mm`, `vial_n`, `motor_gear`; `null` = unknown) |
 | `GET /api/history` | `{"printer_id":…,"factor":…,"prints":[…]}`: every print with `file`, `plan`, `plan_revs`, `revs`, `factor`, `exposure_pct`, `resin`, `result` (under / ok / over / null), `factor_after` |
 | `POST /api/print` `{"id":"lib/print.mp4","revs":6,"factor":1.05,"delay_s":3}` | start (`revs` optional: plan × correction) |
+| `POST /api/print` `{"id":…,"confirm":true}` | what SpinSlicer sends: nothing starts, the printer's screen asks "Print?" and a yes starts it. The answer and `/api/state` carry `request`: `state` = `waiting_confirm` / `started` / `cancelled` / `expired` (10 minutes unanswered) / `replaced` / `error`. No screen connected: 409 |
 | `POST /api/plan` `{"id":…,"factor":1.05}` | turns and seconds it would take, dose deviation, warnings |
 | `POST /api/result` `{"result":"under"}` | how the last print came out: under / ok / over |
 | `POST /api/settings` `{"warmup_min":5}` | projector warm-up, dark spin-up |
@@ -140,7 +141,6 @@ Keep resin out of the light!
 | `POST /api/projector` `{"pattern":"grid"}` | black / white / grid / focus / circle / center / vial |
 | `POST /api/calibration` `{"offset_px":12,"vial_px":400,"show":"center"}` | centering and vial width |
 | `GET /api/state`, `GET /api/events` | state (events = SSE stream, twice a second) |
-| `GET /api/wifi?scan=1`, `POST /api/wifi` `{"ssid":…,"psk":…}` | Wi-Fi (SpinOS only) |
 
 No password: everyone on your Wi-Fi sees the page. Fine for a home network.
 

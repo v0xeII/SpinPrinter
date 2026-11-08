@@ -1781,7 +1781,7 @@ class Mdns:
             return False
         path = os.path.join(self.folder, "spinprinter.service")
         try:
-            os.makedirs(os.path.realpath(self.folder), exist_ok=True)  # SpinOS: a link into /run
+            os.makedirs(os.path.realpath(self.folder), exist_ok=True)
             try:
                 with open(path, encoding="utf-8") as f:
                     same = f.read() == text
@@ -1803,54 +1803,6 @@ class Mdns:
             return False
         self.text = text
         return True
-
-
-# =============================================================================== Wi-Fi (SpinOS)
-class Net:
-    """Home Wi-Fi or the printer's own access point. The work is done by the SpinOS script
-    `spinnet`; on a PC or on Raspberry Pi OS there is no such script and this does nothing."""
-
-    def __init__(self):
-        self.exe = next((p for p in ("/usr/sbin/spinnet", os.environ.get("SPINNET", "")) if p and os.path.exists(p)), "")
-
-    def _run(self, *args, timeout=20):
-        if not self.exe:
-            return ""
-        try:
-            return subprocess.run([self.exe, *args], capture_output=True, text=True, timeout=timeout).stdout
-        except (OSError, subprocess.TimeoutExpired):
-            return ""
-
-    def status(self):
-        """{"mode": "client"|"ap"|"none", "ssid": …, "ip": …, "ap_name": …}"""
-        d = {"available": bool(self.exe), "mode": "none"}
-        for line in self._run("status", timeout=5).splitlines():
-            k, _, v = line.partition("=")
-            if k:
-                d[k.strip()] = v.strip()
-        return d
-
-    def scan(self):
-        nets = []
-        for line in self._run("scan").splitlines():
-            sig, _, ssid = line.partition("\t")
-            if ssid and not any(n["ssid"] == ssid for n in nets):
-                nets.append({"ssid": ssid, "signal": float(sig or -100)})
-        return sorted(nets, key=lambda n: -n["signal"])
-
-    def connect(self, ssid, psk):
-        if not self.exe:
-            return "нет spinnet (это не SpinOS)"
-        if not ssid or len(ssid) > 32 or (psk and not 8 <= len(psk) <= 63):
-            return "имя сети до 32 символов, пароль 8–63 символа"
-        # in the background: the phone that asked is about to lose the access point
-        subprocess.Popen([self.exe, "connect", ssid, psk or ""], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
-        return None
-
-    def forget(self):
-        if self.exe:
-            subprocess.Popen([self.exe, "forget"], start_new_session=True)
 
 
 # =============================================================================== web server
@@ -1909,8 +1861,6 @@ class Handler(BaseHTTPRequestHandler):
             p = a.printer
             return self._json({"api": API_VERSION, "printer_id": p.settings["printer_id"],
                                "factor": p.settings["factor"], "prints": p.history})
-        if u.path == "/api/wifi":
-            return self._json(dict(a.net.status(), networks=a.net.scan() if q.get("scan") else []))
         if u.path == "/api/events":  # Server-Sent Events: live state twice a second
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -1924,12 +1874,6 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(0.5)
             except OSError:
                 return
-        if a.ap_mode:  # captive portal: phones probe some URL on joining the printer's own Wi-Fi
-            self.send_response(302)
-            self.send_header("Location", "http://192.168.4.1/")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
         self._json({"error": "not found"}, 404)
 
     def do_PUT(self):  # upload: PUT /api/files/<name>, body = the video or the .spin file
@@ -2021,12 +1965,6 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/projector":
             err = p.show_pattern(b.get("pattern", "black"))
             return self._json({"ok": err is None, "error": err})
-        if u.path == "/api/wifi":
-            if b.get("forget"):
-                a.net.forget()
-                return self._json({"ok": True})
-            err = a.net.connect(str(b.get("ssid", "")), str(b.get("psk", "")))
-            return self._json({"ok": err is None, "error": err})
         if u.path == "/api/calibration":
             p.calibrate(b.get("offset_px"), b.get("vial_px"))
             if b.get("show"):
@@ -2036,7 +1974,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class App:
-    ap_mode = False
+    """What the request handler needs: library, printer, ESP, projector (set in main())."""
 
 
 def main():
@@ -2072,7 +2010,6 @@ def main():
     ref = {}
     app.esp = Esp(args.serial, lambda ev: ref["p"].on_esp_event(ev))
     app.warm = Warmup(watch=args.hdmi == "watch")
-    app.net = Net()
     app.printer = Printer(app.esp, app.proj, app.lib, args.data, pw, ph, app.warm)
     ref["p"] = app.printer
     threading.Thread(target=app.printer.poll_idle, daemon=True).start()
@@ -2090,15 +2027,7 @@ def main():
             host = socket.gethostname()
             url = f"http://{ip}" if args.port == 80 else f"http://{ip}:{args.port}"
             s = app.printer.settings
-            st = app.net.status() if app.net.exe else {}
-            app.ap_mode = st.get("mode") == "ap"
-            if app.ap_mode:  # first start: the QR code joins the phone to the printer's own Wi-Fi
-                name = st.get("ap_name", "SpinSlicer")
-                g = [f"URL WIFI:T:nopass;S:{name};;", f"HOST 192.168.4.1", f"NET {name}",
-                     f"CAL {s['offset_px']} {s['vial_px']}", f"MSG Wi-Fi: {name}"]
-            else:
-                g = [f"URL {url}", f"HOST {host}.local", f"NET {st.get('ssid') or wifi_name()}",
-                     f"CAL {s['offset_px']} {s['vial_px']}"]
+            g = [f"URL {url}", f"HOST {host}.local", f"NET {wifi_name()}", f"CAL {s['offset_px']} {s['vial_px']}"]
             if g != app.esp.greeting:
                 app.esp.greeting = g
                 app.esp.hello()

@@ -164,8 +164,7 @@ fi
 PSK=""
 
 # the projector stays black: no rainbow, no boot text, no blinking cursor, no login prompt
-# console=serial0 goes too: GPIO14/15 are the wires to the ESP32, Linux must not talk there
-sed -i -E 's/ ?console=tty1//; s/ ?console=serial0,[0-9]+//; s/ ?splash//; s/ ?quiet//' "$WORK/boot/cmdline.txt"
+sed -i -E 's/ ?console=tty1//; s/ ?splash//; s/ ?quiet//' "$WORK/boot/cmdline.txt"
 sed -i -E 's/$/ quiet loglevel=0 logo.nologo vt.global_cursor_default=0 consoleblank=0 isolcpus=3 cfg80211.ieee80211_regdom=RU/' "$WORK/boot/cmdline.txt"
 cat >>"$WORK/boot/config.txt" <<'EOF'
 
@@ -174,21 +173,10 @@ cat >>"$WORK/boot/config.txt" <<'EOF'
 disable_splash=1
 boot_delay=0
 dtparam=audio=off
-# the ESP32 can also be on three wires: GPIO14 TX (pin 8), GPIO15 RX (pin 10), GND (pin 6).
-# The good UART (PL011, /dev/serial0) goes to those pins; Bluetooth is not used.
-enable_uart=1
-dtoverlay=disable-bt
-[pi5]
-# Pi 5: GPIO14/15 are UART0 (/dev/ttyAMA0); /dev/serial0 there is the debug connector
-dtparam=uart0=on
-[all]
 EOF
-# nothing on the wires to the ESP32. NOT getty@tty1: Raspberry Pi OS switches it back on while
-# cloud-init creates the user, and with it masked the user was never made (the "Please enter new
-# username" wizard came up instead). install.sh turns the screen login off once SpinPi is there.
-for unit in serial-getty@ttyAMA0 serial-getty@serial0 serial-getty@ttyS0 hciuart; do
-	ln -sf /dev/null "$WORK/root/etc/systemd/system/$unit.service"
-done
+# (the ESP32 is on the USB cable. NOT getty@tty1 here: Raspberry Pi OS switches it back on while
+# cloud-init creates the user, and with it masked the user was never made. install.sh turns the
+# screen login off once SpinPi is there.)
 
 # SpinPi + SpinProj: copied now, installed by the Pi itself on the first start (needs internet)
 mkdir -p "$WORK/root/opt/spinprinter-src"
