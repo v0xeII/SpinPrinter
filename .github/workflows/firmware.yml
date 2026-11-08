@@ -22,7 +22,12 @@ jobs:
         run: |
           arduino-cli config init --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index
-          arduino-cli core install "esp32:esp32@$ESP32_CORE"
+          # Espressif's download server answers 504 now and then: try again before giving up
+          for i in 1 2 3 4 5; do
+            arduino-cli core install "esp32:esp32@$ESP32_CORE" && break
+            [ "$i" = 5 ] && exit 1
+            echo "core install failed, retry $i in $((i * 30)) s"; sleep $((i * 30))
+          done
       - name: compile
         run: arduino-cli compile --fqbn "$FQBN" --build-path build SpinScreen_v0.7/SpinScreen
       - name: flasher site (page + firmware parts + manifest)
