@@ -7,17 +7,31 @@
 <title>SpinSlicer Printer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script>
+(function(){ let th=null; try{ th=localStorage.getItem("spinprinter-theme"); }catch(e){}
+  if(th!=="light"&&th!=="dark") th=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+  document.documentElement.dataset.theme=th; })();
+</script>
 <style>
 :root{
   --bg:#0a080b; --panel:#151016; --panel2:#1c151e; --line:#2a2029; --text:#f7e3ec; --dim:#a88f9b; --faint:#5c4a55;
   --pink:#ff8db5; --hot:#ff4f9a; --dark:#170910; --ok:#ff8db5; --warn:#ffb86b;
+  --err:#ff9db8; --danger-bg:#2a1119; --danger-line:#4a1f2d; --tint:rgba(255,141,181,.05); --tick:#4a3b44;
+  --glow1:rgba(255,79,154,.16); --glow2:rgba(255,141,181,.07); --dial:#100b11;
   --r:20px; --font:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+/* light: the colours of SpinSlicer's light theme */
+:root[data-theme="light"]{
+  --bg:#f6f4f0; --panel:#ffffff; --panel2:#ffffff; --line:#ddd8d1; --text:#19171a; --dim:#6c686b; --faint:#a39e98;
+  --pink:#e5452b; --hot:#ee5c43; --dark:#ffffff; --ok:#1e8a4c; --warn:#b86a00;
+  --err:#c62828; --danger-bg:#fbe9e7; --danger-line:#f3c2b9; --tint:rgba(229,69,43,.05); --tick:#ddd8d1;
+  --glow1:rgba(229,69,43,.07); --glow2:rgba(229,69,43,.03); --dial:#f6f4f0;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
 body{min-height:100vh;background:
-  radial-gradient(900px 500px at 85% -10%,rgba(255,79,154,.16),transparent 60%),
-  radial-gradient(700px 400px at -10% 30%,rgba(255,141,181,.07),transparent 60%),var(--bg)}
+  radial-gradient(900px 500px at 85% -10%,var(--glow1),transparent 60%),
+  radial-gradient(700px 400px at -10% 30%,var(--glow2),transparent 60%),var(--bg)}
 .wrap{max-width:980px;margin:0 auto;padding:20px 16px 60px}
 header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:22px}
 .brand{display:flex;align-items:center;gap:12px;flex:1;min-width:220px}
@@ -29,6 +43,7 @@ header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:22p
   padding:6px 12px;font-size:13px;color:var(--dim);white-space:nowrap}
 .chip i{width:8px;height:8px;border-radius:50%;background:var(--faint)}
 .chip.on{color:var(--text)} .chip.on i{background:var(--pink);box-shadow:0 0 10px var(--hot)}
+:root[data-theme="light"] .chip.on i{background:var(--ok);box-shadow:none}
 .lang{cursor:pointer;user-select:none}
 .grid{display:grid;grid-template-columns:1.25fr 1fr;gap:16px}
 @media (max-width:820px){.grid{grid-template-columns:1fr}}
@@ -56,12 +71,12 @@ button,.btn{font-family:var(--font);font-size:15px;font-weight:700;border:0;bord
 button:active{transform:scale(.97)}
 button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
 button.ghost:hover{border-color:var(--faint)}
-button.danger{background:#2a1119;color:#ff9db8;border:1px solid #4a1f2d}
+button.danger{background:var(--danger-bg);color:var(--err);border:1px solid var(--danger-line)}
 button.big{font-size:17px;padding:15px 26px;border-radius:16px}
 button:disabled{opacity:.35;cursor:not-allowed}
 /* drop */
 .drop{display:block;border:1.5px dashed var(--faint);border-radius:18px;padding:26px 16px;text-align:center;cursor:pointer;transition:.2s;position:relative;overflow:hidden}
-.drop:hover,.drop.over{border-color:var(--pink);background:rgba(255,141,181,.05)}
+.drop:hover,.drop.over{border-color:var(--pink);background:var(--tint)}
 .drop b{display:block;font-size:17px;margin-bottom:4px}
 .drop span{color:var(--dim);font-size:13px}
 .bar{height:6px;border-radius:9px;background:var(--line);overflow:hidden;margin-top:14px;display:none}
@@ -79,7 +94,7 @@ button:disabled{opacity:.35;cursor:not-allowed}
 .badge.alt{background:transparent;color:var(--pink);border:1px solid var(--pink)}
 .badge.warn{background:var(--warn)}
 .file img.pv{object-fit:contain;width:45px;margin:0 13px}
-.file .e{color:#ff9db8;font-size:12px;margin-top:2px}
+.file .e{color:var(--err);font-size:12px;margin-top:2px}
 .file .w{color:var(--warn);font-size:12px;margin-top:2px}
 .prof select{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:10px 12px;font:600 15px var(--font)}
 .prof input.txt{flex:1}
@@ -91,7 +106,7 @@ button:disabled{opacity:.35;cursor:not-allowed}
 .plan{margin-top:10px;font-size:13px;color:var(--dim);line-height:1.5}
 .plan b{color:var(--text)}
 .summary{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--bg);border:1px solid var(--line);font-size:14px;line-height:1.6}
-.summary .w{color:#ff9db8}
+.summary .w{color:var(--err)}
 .hist{display:flex;flex-direction:column;gap:6px;margin-top:4px}
 .hist div{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--dim);border-bottom:1px solid var(--line);padding:6px 0}
 .hist b{color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -157,6 +172,7 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
       <div class="chip" id="cEsp"><i></i><span>ESP32</span></div>
       <div class="chip" id="cProj"><i></i><span data-i="projector">Проектор</span></div>
       <div class="chip" id="cMotor"><i></i><span id="cMotorT">0.00</span></div>
+      <div class="chip lang" id="theme" title="light / dark"></div>
       <div class="chip lang" id="lang">EN</div>
     </div>
   </header>
@@ -166,10 +182,10 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
       <div class="hero">
         <div class="ring">
           <svg viewBox="0 0 120 120">
-            <circle cx="60" cy="60" r="52" stroke="#2a2029" stroke-width="7" fill="none"/>
+            <circle cx="60" cy="60" r="52" style="stroke:var(--line)" stroke-width="7" fill="none"/>
             <circle id="arc" cx="60" cy="60" r="52" stroke="url(#g)" stroke-width="7" fill="none" stroke-linecap="round"
                     stroke-dasharray="326.7" stroke-dashoffset="326.7" style="transition:stroke-dashoffset .5s linear"/>
-            <defs><linearGradient id="g"><stop offset="0" stop-color="#ff4f9a"/><stop offset="1" stop-color="#ff8db5"/></linearGradient></defs>
+            <defs><linearGradient id="g"><stop offset="0" style="stop-color:var(--hot)"/><stop offset="1" style="stop-color:var(--pink)"/></linearGradient></defs>
           </svg>
           <div class="mid"><div class="big" id="ringBig">—</div><div class="sub" id="ringSub"></div></div>
         </div>
@@ -197,9 +213,9 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
         <h2 data-i="motor">Мотор</h2>
         <div class="tacho">
           <svg viewBox="0 0 84 84">
-            <circle cx="42" cy="42" r="36" fill="#100b11" stroke="#2a2029" stroke-width="2"/>
+            <circle cx="42" cy="42" r="36" style="fill:var(--dial);stroke:var(--line)" stroke-width="2"/>
             <g id="ticks"></g>
-            <circle id="dot" cx="42" cy="6" r="4.2" fill="#f7e3ec" style="filter:drop-shadow(0 0 4px #ff4f9a)"/>
+            <circle id="dot" cx="42" cy="6" r="4.2" style="fill:var(--pink);filter:drop-shadow(0 0 4px var(--hot))"/>
           </svg>
           <div><div class="v" id="rpmNow">0.00</div><div class="u" data-i="rpm">об/мин</div></div>
         </div>
@@ -308,6 +324,7 @@ function applyLang(){
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-i]").forEach(e=>e.textContent=t(e.dataset.i));
   $("lang").textContent = lang==="ru" ? "EN" : "RU";
+  if(typeof applyTheme==="function") applyTheme();
   render(); renderFiles(); renderProfile();
 }
 const $ = id => document.getElementById(id);
@@ -323,7 +340,7 @@ const fmtMB = b => (b/1048576).toFixed(b>1e8?0:1)+" MB";
 
 // tachometer ticks
 (()=>{ let h=""; for(let i=0;i<12;i++){ const a=i*Math.PI/6-Math.PI/2, r0=i%3?30:27, r1=34;
-  h+=`<line x1="${42+Math.cos(a)*r0}" y1="${42+Math.sin(a)*r0}" x2="${42+Math.cos(a)*r1}" y2="${42+Math.sin(a)*r1}" stroke="${i?'#4a3b44':'#ff8db5'}" stroke-width="${i?1.5:2.2}" stroke-linecap="round"/>`;}
+  h+=`<line x1="${42+Math.cos(a)*r0}" y1="${42+Math.sin(a)*r0}" x2="${42+Math.cos(a)*r1}" y2="${42+Math.sin(a)*r1}" style="stroke:${i?'var(--tick)':'var(--pink)'}" stroke-width="${i?1.5:2.2}" stroke-linecap="round"/>`;}
   $("ticks").innerHTML=h; })();
 let shownAngle=0, lastFrame=performance.now();
 function animate(now){
@@ -356,7 +373,7 @@ function render(){
     else { p=j.progress; big=fmtT(j.left_s); sub=t("left"); }
     meta=`<b>${esc(j.file)}</b><br>${t("turnsOf")} ${Math.max(1,j.turn)} ${t("of")} ${j.revs} · ${fmtT(j.time_s)} ${t("light")} · ${j.rpm.toFixed(2)} ${t("rpm")}`+
          (S.sync_ms!=null?` · ${t("sync")} ±${S.sync_ms.toFixed(0)} ms`:"")+
-         (S.drops?`<br><span style="color:#ff9db8">${t("drops")}: ${S.drops}</span>`:"");
+         (S.drops?`<br><span style="color:var(--err)">${t("drops")}: ${S.drops}</span>`:"");
     btns=`<button class="danger big" onclick="stopPrint()">${t("stopPrint")}</button>`;
   } else {
     if(st==="done"){ p=1; big="✓"; }
@@ -366,7 +383,7 @@ function render(){
     }
     if(S.hdmi===false) meta+=`<span style="color:var(--warn)">${t("hdmi")}</span><br>`;
     else if(S.warmup_left_s>0) meta+=`<span style="color:var(--warn)">${t("warmLeft")}: ${fmtT(S.warmup_left_s)}</span><br>`;
-    if(st==="error") meta=`<span style="color:#ff9db8">${esc(S.msg)}</span><br>`;
+    if(st==="error") meta=`<span style="color:var(--err)">${esc(S.msg)}</span><br>`;
     if(!S.esp) meta+=t("noEsp")+"<br>";
     if(!S.projector && S.projector_err) meta+=`<span style="color:var(--warn)">mpv: ${esc(S.projector_err)}</span><br>`;
     const last=S.settings.last_id && FILES.find(f=>f.id===S.settings.last_id);
@@ -511,6 +528,13 @@ function syncCal(){ if(calFocus||!S) return; const s=S.settings; $("offN").value
   $(n).oninput=()=>{ $(r).value=$(n).value; sendCal(show); };
   [n,r].forEach(i=>{ $(i).onfocus=()=>calFocus=true; $(i).onblur=()=>calFocus=false; });
 });
+function applyTheme(){
+  const light=document.documentElement.dataset.theme==="light";
+  $("theme").textContent = light ? (lang==="ru"?"Тёмная":"Dark") : (lang==="ru"?"Светлая":"Light");
+  document.querySelector('meta[name="theme-color"]').content = light ? "#f6f4f0" : "#0a080b";
+}
+$("theme").onclick=()=>{ const th=document.documentElement.dataset.theme==="light"?"dark":"light";
+  document.documentElement.dataset.theme=th; try{localStorage.setItem("spinprinter-theme",th);}catch(e){} applyTheme(); };
 $("lang").onclick=()=>{ lang=lang==="ru"?"en":"ru"; try{localStorage.setItem("spinpi-lang",lang);}catch(e){} applyLang(); };
 
 // live state
@@ -520,7 +544,7 @@ function connect(){
   es.onmessage=e=>{ S=JSON.parse(e.data); render(); if(prevState && prevState!==S.state) loadFiles(); prevState=S.state; };
   es.onerror=()=>{ es.close(); setTimeout(connect,2000); };
 }
-applyLang(); loadFiles(); connect(); loadProfile();
+applyLang(); applyTheme(); loadFiles(); connect(); loadProfile();
 </script>
 </body>
 </html>

@@ -8,18 +8,26 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;600;800&display=swap" rel="stylesheet">
 <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<script>
+(function(){ let th=null; try{ th=localStorage.getItem("spinprinter-theme"); }catch(e){}
+  if(th!=="light"&&th!=="dark") th=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+  document.documentElement.dataset.theme=th; })();
+</script>
 <style>
-:root{--bg:#0a080b;--panel:#151016;--line:#2a2029;--text:#f7e3ec;--dim:#a88f9b;--pink:#ff8db5;--hot:#ff4f9a;--dark:#170910;
-  --font:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+:root{--bg:#0a080b;--panel:#151016;--panel2:#1c151e;--line:#2a2029;--text:#f7e3ec;--dim:#a88f9b;--pink:#ff8db5;--hot:#ff4f9a;--dark:#170910;
+  --glow:rgba(255,79,154,.16);--font:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+/* light: the colours of SpinSlicer's light theme */
+:root[data-theme="light"]{--bg:#f6f4f0;--panel:#ffffff;--panel2:#ffffff;--line:#ddd8d1;--text:#19171a;--dim:#6c686b;
+  --pink:#e5452b;--hot:#ee5c43;--dark:#ffffff;--glow:rgba(229,69,43,.07)}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
-body{min-height:100vh;background:radial-gradient(800px 420px at 85% -10%,rgba(255,79,154,.16),transparent 60%),var(--bg)}
+body{min-height:100vh;background:radial-gradient(800px 420px at 85% -10%,var(--glow),transparent 60%),var(--bg)}
 .wrap{max-width:860px;margin:0 auto;padding:28px 16px 60px}
 header{display:flex;align-items:center;gap:14px;margin-bottom:26px}
 header h1{margin:0;font-size:26px;font-weight:800;color:var(--pink);letter-spacing:-.5px;flex:1}
 header small{display:block;color:var(--dim);font-size:13px;font-weight:600;margin-top:2px}
 .lang{background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:99px;padding:6px 14px;cursor:pointer;font:600 13px var(--font)}
-.card{background:linear-gradient(180deg,#1c151e,var(--panel));border:1px solid var(--line);border-radius:20px;padding:22px;margin-bottom:16px}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:20px;padding:22px;margin-bottom:16px}
 .card h2{margin:0 0 12px;font-size:13px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);font-weight:600}
 .step{display:flex;gap:14px;margin:12px 0;line-height:1.55}
 .step b.n{flex:none;width:28px;height:28px;border-radius:50%;background:var(--dark);border:1px solid var(--hot);color:var(--pink);display:grid;place-items:center;font-size:14px}
@@ -40,6 +48,7 @@ footer{color:var(--dim);font-size:13px;text-align:center;margin-top:28px}
 <div class="wrap">
   <header>
     <h1>SpinPrinter<small><span data-l="ru">прошивка платы</span><span data-l="en">flash the board</span></small></h1>
+    <button class="lang" id="theme"></button>
     <button class="lang" id="lang">EN</button>
   </header>
 
@@ -86,7 +95,17 @@ footer{color:var(--dim);font-size:13px;text-align:center;margin-top:28px}
 const root = document.documentElement;
 let lang = (navigator.language || "ru").startsWith("ru") ? "ru" : "en";
 try { lang = localStorage.getItem("spinprinter-lang") || lang; } catch (e) {}
-function apply() { root.lang = lang; document.getElementById("lang").textContent = lang === "ru" ? "EN" : "RU"; }
+function apply() {
+  root.lang = lang; document.getElementById("lang").textContent = lang === "ru" ? "EN" : "RU";
+  const light = root.dataset.theme === "light";
+  document.getElementById("theme").textContent = light ? (lang === "ru" ? "Тёмная" : "Dark") : (lang === "ru" ? "Светлая" : "Light");
+  document.querySelector('meta[name="theme-color"]').content = light ? "#f6f4f0" : "#0a080b";
+}
+document.getElementById("theme").onclick = () => {
+  root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
+  try { localStorage.setItem("spinprinter-theme", root.dataset.theme); } catch (e) {}
+  apply();
+};
 document.getElementById("lang").onclick = () => { lang = lang === "ru" ? "en" : "ru"; try { localStorage.setItem("spinprinter-lang", lang); } catch (e) {} apply(); };
 apply();
 fetch("manifest.json").then(r => r.json()).then(m => { document.getElementById("ver").textContent = "v" + m.version; }).catch(() => {});
