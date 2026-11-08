@@ -1,11 +1,9 @@
 #pragma once
 #include <stdint.h>
 
-#include "hw.h"
-
-// Starts the screen chosen in hw (any of hw.h's panels). false: no RAM or a bad pin.
-bool display_init(const HwConfig& hw);
-int display_width();   // after rotation: 320x170, 320x240, 240x240, 160x128
+// Starts the ST7789 on the pins in config.h. false: no RAM or the SPI did not start.
+bool display_init();
+int display_width();   // 320 (landscape, config.h TFT_ROTATION)
 int display_height();
 uint16_t* display_buffer();  // draw the next frame here
 // Send the frame. Only the parts that changed since the last frame go over SPI.

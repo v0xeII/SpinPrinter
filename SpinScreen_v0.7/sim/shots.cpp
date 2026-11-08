@@ -1,8 +1,6 @@
 // Screenshots of every screen at one size, drawn by the real UI (ui.cpp) with a scripted user and
 // a fake Pi. Writes one PPM per screen into a folder; dev/make_shots.py puts them on one sheet.
-//   ./shots 320x170 out/          (also: round  = the round GC9A01 layout, axo = Spinny on the
-//   ./shots 240x240 round out/     main page instead of the card, en = English,
-//                                  encoder / joystick = the hints for those controls)
+//   ./shots out/          (also: axo = Spinny on the main page instead of the card, en = English)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,7 +11,8 @@
 #include "gfx.h"
 #include "ui.h"
 
-static int W = 320, H = 170, nowMs = 0, shotN = 0;
+static const int W = 320, H = 240;
+static int nowMs = 0, shotN = 0;
 static std::string dir = ".";
 static std::vector<uint16_t> fb;
 static float curRpm = 0, tgtRpm = 0;
@@ -66,15 +65,10 @@ static void shot(const char* name) {
 }
 
 int main(int argc, char** argv) {
-  bool round = false, axo = false, en = false;
-  int input = 1;
+  bool axo = false, en = false;
   for (int i = 1; i < argc; i++) {
-    if (sscanf(argv[i], "%dx%d", &W, &H) == 2) continue;
-    if (!strcmp(argv[i], "round")) round = true;
-    else if (!strcmp(argv[i], "axo")) axo = true;
+    if (!strcmp(argv[i], "axo")) axo = true;
     else if (!strcmp(argv[i], "en")) en = true;
-    else if (!strcmp(argv[i], "encoder")) input = 2;
-    else if (!strcmp(argv[i], "joystick")) input = 3;
     else dir = argv[i];
   }
   fb.assign(W * H, 0);
@@ -82,8 +76,6 @@ int main(int argc, char** argv) {
   cv = &c;
   UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove};
   Settings s{4.0f, en ? 1 : 0, 80, 16, 200, 6.f, 0, 1.0f, 1, axo ? HOME_AXO : HOME_CARD, 0};
-  ui_set_panel(round ? "GC9A01" : "", round);
-  ui_set_input(input);
   ui_init(hal, s, 0);
   line("URL http://192.168.1.42");
   line("HOST spinslicer.local");
@@ -160,5 +152,18 @@ int main(int argc, char** argv) {
   key(K_DOWN);
   key(K_OK, 700);  // Выключить -> Точно?
   shot("confirm");
+  key(K_BACK, 900);
+  // a print sent from SpinSlicer: the yes on the printer
+  line("ASK 6 214 lattice_cube.spin");
+  frames(900);
+  shot("ask");
+  // on the print screen one ← only asks, the second stops
+  key(K_OK, 900);
+  line("STATE PRINT");
+  line("TURNS 6");
+  line("PROG 10 190");
+  frames(900);
+  key(K_BACK, 600);
+  shot("print_stop_ask");
   return 0;
 }

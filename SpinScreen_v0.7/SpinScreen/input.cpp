@@ -1,22 +1,22 @@
-// Buttons, rotary encoder or joystick -> UP / DOWN / OK / BACK (long press OK).
-// Which one, and on which pins, is chosen at run time (hw.h).
+// The KY-023 joystick (config.h) -> UP / DOWN / OK / BACK.
+// Up / down = move (repeats while held), right or a press = OK, left or a long press = BACK.
 #ifdef ARDUINO
 #include "input.h"
 
 #include <Arduino.h>
 
+#include "config.h"
+
 #include "driver/gpio.h"
-#include "soc/gpio_reg.h"
 
 static const uint32_t DEBOUNCE = 25, LONG = 650, REPEAT_DELAY = 420, REPEAT_EVERY = 110;
-static HwConfig C;
 
 struct Btn {
   int pin;
   bool down = false, raw = false, longFired = false;
   uint32_t changed = 0, pressedAt = 0, lastRepeat = 0;
 };
-static Btn ok, up, dn;
+static Btn ok;  // the stick's own button (SW)
 
 // returns true on a debounced edge
 static bool update(Btn& b, uint32_t now) {
@@ -36,34 +36,6 @@ static Key okKey(uint32_t now) {
   if (ok.down && !ok.longFired && now - ok.pressedAt >= LONG) { ok.longFired = true; return K_BACK; }
   if (edge && !ok.down && !ok.longFired) return K_OK;
   return K_NONE;
-}
-
-// ------------------------------------------------------------------ buttons
-static Key arrowKey(Btn& b, Key k, uint32_t now) {
-  bool edge = update(b, now);
-  if (edge && b.down) return k;
-  if (b.down && now - b.pressedAt > REPEAT_DELAY && now - b.lastRepeat > REPEAT_EVERY) {
-    b.lastRepeat = now;
-    return k;
-  }
-  return K_NONE;
-}
-
-// ------------------------------------------------------------------ encoder
-static volatile int encCount = 0;
-static volatile uint8_t encState = 0;
-static int encUsed = 0;
-static DRAM_ATTR uint32_t encRegA, encRegB, encMaskA, encMaskB;  // where the ISR reads its two pins
-
-static void IRAM_ATTR encIsr() {
-  static const DRAM_ATTR int8_t T[16] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
-  uint8_t s = ((REG_READ(encRegA) & encMaskA) ? 2 : 0) | ((REG_READ(encRegB) & encMaskB) ? 1 : 0);
-  encState = ((encState << 2) | s) & 0x0F;
-  encCount += T[encState];
-}
-static void pinReg(int pin, uint32_t& reg, uint32_t& mask) {  // GPIO 0..31 and 32..48 live in two registers
-  reg = pin < 32 ? GPIO_IN_REG : GPIO_IN1_REG;
-  mask = 1u << (pin & 31);
 }
 
 // ------------------------------------------------------------------ joystick
@@ -161,64 +133,27 @@ static Key joyPoll(uint32_t now) {
 
 // "JOY" over serial: is each axis on, its centre, what the power-up check saw, the last read
 void input_debug(char* out, int n) {
-  if (C.input != IN_JOYSTICK) { snprintf(out, n, "JOY none"); return; }
   snprintf(out, n, "JOY ud pin%d ok%d c%d pull%d..%d spread%d..%d now%d | lr pin%d ok%d c%d pull%d..%d spread%d..%d now%d | sw%d",
            axUD.pin, axUD.ok, axUD.centre, axUD.lo, axUD.hi, axUD.mn, axUD.mx, axUD.last,
            axLR.pin, axLR.ok, axLR.centre, axLR.lo, axLR.hi, axLR.mn, axLR.mx, axLR.last,
-           digitalRead(C.inC));
+           digitalRead(PIN_JOY_SW));
 }
 
 // ------------------------------------------------------------------
-void input_init(const HwConfig& hw) {
-  C = hw;
-  ok.pin = C.inC;
-  pinMode(C.inC, INPUT_PULLUP);
-  if (C.input == IN_BUTTONS) {
-    up.pin = C.inA;
-    dn.pin = C.inB;
-    pinMode(C.inA, INPUT_PULLUP);
-    pinMode(C.inB, INPUT_PULLUP);
-  } else if (C.input == IN_ENCODER) {
-    pinMode(C.inA, INPUT_PULLUP);
-    pinMode(C.inB, INPUT_PULLUP);
-    pinReg(C.inA, encRegA, encMaskA);
-    pinReg(C.inB, encRegB, encMaskB);
-    attachInterrupt(digitalPinToInterrupt(C.inA), encIsr, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(C.inB), encIsr, CHANGE);
-  } else {
-    if (C.joyGnd >= 0) {  // the stick powered straight from two pins
-      pinMode(C.joyGnd, OUTPUT);
-      digitalWrite(C.joyGnd, LOW);
-    }
-    if (C.joyVcc >= 0) {
-      pinMode(C.joyVcc, OUTPUT);
-      digitalWrite(C.joyVcc, HIGH);
-    }
-    delay(5);
-    // which physical axis is "up/down" and which is "OK/back"
-    axUD.pin = C.joySwap ? C.inA : C.inB;
-    axLR.pin = C.joySwap ? C.inB : C.inA;
-    axUD.invert = C.joyInvY;
-    axLR.invert = C.joyInvX;
-    analogReadResolution(12);
-    analogSetAttenuation(ADC_11db);  // the full 0..3.3 V range
-    // the centre: the stick must be left alone at power-up
-    probeAxis(axUD);
-    probeAxis(axLR);
-  }
+void input_init() {
+  ok.pin = PIN_JOY_SW;
+  pinMode(PIN_JOY_SW, INPUT_PULLUP);
+  // which physical axis is "up/down" and which is "OK/back"
+  axUD.pin = JOY_SWAP_XY ? PIN_JOY_X : PIN_JOY_Y;
+  axLR.pin = JOY_SWAP_XY ? PIN_JOY_Y : PIN_JOY_X;
+  axUD.invert = JOY_INVERT_Y;
+  axLR.invert = JOY_INVERT_X;
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);  // the full 0..3.3 V range
+  // the centre: the stick must be left alone at power-up
+  probeAxis(axUD);
+  probeAxis(axLR);
 }
 
-Key input_poll(uint32_t now) {
-  if (C.input == IN_JOYSTICK) return joyPoll(now);
-  if (C.input == IN_ENCODER) {
-    int c = encCount, d = C.encDetent;
-    if (c - encUsed >= d) { encUsed += d; return K_DOWN; }
-    if (encUsed - c >= d) { encUsed -= d; return K_UP; }
-    return okKey(now);
-  }
-  Key k;
-  if ((k = arrowKey(up, K_UP, now)) != K_NONE) return k;
-  if ((k = arrowKey(dn, K_DOWN, now)) != K_NONE) return k;
-  return okKey(now);
-}
+Key input_poll(uint32_t now) { return joyPoll(now); }
 #endif

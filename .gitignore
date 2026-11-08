@@ -11,6 +11,8 @@ SpinScreen_v0.7/sim/virtual_esp
 SpinScreen_v0.7/sim/sim
 SpinScreen_v0.7/sim/bench
 SpinScreen_v0.7/sim/spinny_stress
+SpinScreen_v0.7/sim/shots
+SpinScreen_v0.7/sim/dirty_test
 SpinScreen_v0.7/sim/*.ppm
 *.o
 # test bench: generated videos, data, logs

@@ -39,12 +39,6 @@ void ui_init(const UiHal& hal, const Settings& s, uint32_t nowMs);
 void ui_key(Key k, uint32_t nowMs);
 void ui_line(const char* line, uint32_t nowMs);  // a text line received from the Pi
 // draw one frame; returns the frame rate it wants next (60 or 30). subMs: fraction of a millisecond,
-// for even motion. The layout follows c's size (320x170, 320x240, 240x240, 160x128).
+// for even motion. The screen is 320x240 (config.h).
 int ui_frame(Canvas& c, uint32_t nowMs, float subMs = 0);
-// Which screen (for the About page) and whether its glass is round (GC9A01): the round layout.
-// Call before ui_init(); without it the layout comes from the size alone.
-void ui_set_panel(const char* name, bool round);
-// Which controls the board has (1 buttons, 2 KY-040 encoder, 3 KY-023 joystick: hw.h IN_*). The hints on
-// the screen describe them, and with the encoder clockwise makes a value bigger while editing.
-void ui_set_input(int mode);
 void ui_stats(float frameMs, float kbPerFrame, float drawMs = -1);  // for the About screen
