@@ -1,9 +1,8 @@
 #pragma once
 #include <stdint.h>
 
-#include "hw.h"
 #include "ui.h"
 
-void input_init(const HwConfig& hw);  // buttons, encoder or joystick, on the pins in hw
+void input_init();  // the joystick on the pins in config.h
 Key input_poll(uint32_t nowMs);  // call often; returns K_NONE when nothing happened
 void input_debug(char* out, int n);  // one line for the "JOY" serial command (joystick state)

@@ -14,10 +14,7 @@ static void hs(const char*) {} static void hsp(bool o, float r) { tgt = o ? r : 
 static void hsv(const Settings&) {} static float hr() { return cur; } static double ha() { return ang; }
 static void hc(const Settings&) {} static void hz() { ang = 0; } static void hm(double, float) {}
 int main(int argc, char** argv) {
-  int W = 320, H = 170;
-  if (argc > 1) sscanf(argv[1], "%dx%d", &W, &H);
-  bool round = argc > 2 && !strcmp(argv[2], "round");  // ./bench 240x240 round
-  ui_set_panel(round ? "GC9A01" : "", round);
+  const int W = 320, H = 240;
   std::vector<uint16_t> fb(W * H), prev(W * H, 0xFFFF);
   Canvas c(W, H, fb.data());
   UiHal hal{hs, hsp, hb, hsv, hr, ha, hc, hz, hm};
@@ -63,7 +60,7 @@ int main(int argc, char** argv) {
         }
     }
   }
-  printf("%dx%d%s\n", W, H, round ? " round" : "");
+  printf("%dx%d\n", W, H);
   for (auto& p : ph) {
     double sec = (p.t1 - p.t0) / 1000.0;
     printf("  %-22s %4.0f fps  %6.0f SDF px/frame  %5.1f KB/frame over SPI  (PC: %.3f ms/frame)\n", p.name,

@@ -340,13 +340,13 @@ static void saveShot(const char* path, const std::vector<uint16_t>& chrome, int 
 
 // ============================================================================ main
 int main(int argc, char** argv) {
-  int W = 320, H = 170, scale = 3;
+  const int W = 320, H = 240;
+  int scale = 3;
   bool headless = false;
   std::string inject, link, shot;
   double shotAt = 5;
   for (int i = 1; i < argc; i++) {
-    if (!strncmp(argv[i], "--size=", 7)) sscanf(argv[i] + 7, "%dx%d", &W, &H);
-    else if (!strncmp(argv[i], "--scale=", 8)) scale = atoi(argv[i] + 8);
+    if (!strncmp(argv[i], "--scale=", 8)) scale = atoi(argv[i] + 8);
     else if (!strcmp(argv[i], "--headless")) headless = true;
     else if (!strcmp(argv[i], "--lang=en")) { EN = true; S0.lang = 1; }
     else if (!strcmp(argv[i], "--inject") && i + 1 < argc) inject = argv[++i];
@@ -354,7 +354,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
     else if (!strcmp(argv[i], "--shot-at") && i + 1 < argc) shotAt = atof(argv[++i]);
     else {
-      fprintf(stderr, "usage: virtual_esp [--size=320x170|240x240] [--scale=3] [--headless] [--lang=en] [--inject FILE] [--link PATH] [--shot FILE --shot-at S]\n");
+      fprintf(stderr, "usage: virtual_esp [--scale=3] [--headless] [--lang=en] [--inject FILE] [--link PATH] [--shot FILE --shot-at S]\n");
       return 2;
     }
   }

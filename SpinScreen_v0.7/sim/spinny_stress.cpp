@@ -38,13 +38,7 @@ int main(int argc, char** argv) {
   unsigned seed = argc > 1 ? atoi(argv[1]) : 1;
   rs = seed;
   bool stalls = !(argc > 2 && !strcmp(argv[2], "nostall"));
-  int W = 320, H = 170;
-  bool round = false;  // ./spinny_stress SEED [nostall|stall] [WxH] [round]
-  for (int i = 3; i < argc; i++) {
-    if (!strcmp(argv[i], "round")) round = true;
-    else sscanf(argv[i], "%dx%d", &W, &H);
-  }
-  ui_set_panel(round ? "GC9A01" : "", round);
+  const int W = 320, H = 240;  // ./spinny_stress SEED [nostall|stall]
   std::vector<uint16_t> fb(W * H);
   Canvas c(W, H, fb.data());
   UiHal hal{hs, hsp, hb, hsv, hr, ha, hc, hz, hm};

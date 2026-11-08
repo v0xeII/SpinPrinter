@@ -2,7 +2,6 @@
 #   make virtual_esp   the screen in a window + a serial port for SpinPi (needs SDL2; without it: headless only)
 #   make sim bench     the older recorders: frames to stdout / speed per frame
 #   make shots         screenshots of every screen (python ../../dev/make_shots.py ./shots ../screens)
-#   make hw_test       the CONFIG line: parsing, pin checks, presets
 CXX ?= c++
 CC ?= cc
 CXXFLAGS ?= -O2
@@ -31,7 +30,7 @@ bench: bench.cpp $(FW) qr.o
 	$(CXX) $(CXXFLAGS) bench.cpp ../SpinScreen/ui.cpp qr.o -o $@
 
 clean:
-	rm -f virtual_esp sim bench dirty_test spinny_stress shots hw_test qr.o
+	rm -f virtual_esp sim bench dirty_test spinny_stress shots qr.o
 
 .PHONY: all clean
 
@@ -43,6 +42,3 @@ spinny_stress: spinny_stress.cpp $(FW) qr.o
 
 shots: shots.cpp $(FW) qr.o
 	$(CXX) $(CXXFLAGS) shots.cpp ../SpinScreen/ui.cpp qr.o -o $@
-
-hw_test: hw_test.cpp ../SpinScreen/hw.cpp ../SpinScreen/hw.h ../SpinScreen/config.h
-	$(CXX) $(CXXFLAGS) hw_test.cpp ../SpinScreen/hw.cpp -o $@
