@@ -9,7 +9,7 @@
 ```
  телефон / ПК ──Wi-Fi──► Raspberry Pi ──HDMI──► проектор
                               │
-                              └──USB или 4 провода──► ESP32-S3 (экран, кнопки, мотор)
+                              └──USB-кабель──► ESP32-S3 (экран, джойстик, мотор)
 ```
 
 **Кадр по углу (с версии 0.5).** ESP32 считает каждый шаг мотора и знает угол флакона. SpinPi
@@ -58,11 +58,11 @@ ssh твоёимя@spinslicer.local
 curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash
 ```
 Она скачает SpinPi и SpinProj, поставит ffmpeg и python3-serial, соберёт SpinProj прямо на Pi,
-запустит службу, сделает проектор чёрным до печати, освободит UART-пины для ESP и перезагрузит Pi
+запустит службу, сделает проектор чёрным до печати и перезагрузит Pi
 (10–20 минут). Запустить ещё раз = обновить.
 
 ### 4. Подключить
-- ESP32 с экраном: USB-кабелем в Pi **или** 4 проводами к гребёнке ([схема](../docs/wiring.ru.svg)).
+- ESP32 с экраном: USB-кабелем в Pi ([схема](../docs/wiring.ru.svg)).
 - Проектор: HDMI в Pi.
 - На экране ESP: **Подключение** → QR-код с адресом.
 
@@ -163,6 +163,7 @@ OpenCAL просто крутит видео, пока человек не ув�
 | `POST /api/printer` `{"name":"Шкаф","vial_diameter_mm":25,"motor_dir":"cw_from_top"}` | изменить профиль (ещё `irradiance_mw_cm2`, `contrast`, `vial_wall_mm`, `vial_n`, `motor_gear`; `null` = неизвестно) |
 | `GET /api/history` | `{"printer_id":…,"factor":…,"prints":[…]}`: каждая печать с `file`, `plan`, `plan_revs`, `revs`, `factor`, `exposure_pct`, `resin`, `result` (under / ok / over / null), `factor_after` |
 | `POST /api/print` `{"id":"lib/print.mp4","revs":6,"factor":1.05,"delay_s":3}` | начать печать (`revs` можно не указывать: возьмётся из расчёта × поправка) |
+| `POST /api/print` `{"id":…,"confirm":true}` | так шлёт SpinSlicer: печать не начинается, экран принтера спрашивает «Печатать?», «да» запускает. Ответ и `/api/state` несут `request`: `state` = `waiting_confirm` / `started` / `cancelled` / `expired` (10 минут без ответа) / `replaced` / `error`. Экран не подключён: 409 |
 | `POST /api/plan` `{"id":…,"factor":1.05}` | сколько оборотов и секунд получится, отклонение дозы, предупреждения |
 | `POST /api/result` `{"result":"under"}` | как вышла последняя печать: under / ok / over |
 | `POST /api/settings` `{"warmup_min":5}` | прогрев проектора, пауза до света |
@@ -171,7 +172,6 @@ OpenCAL просто крутит видео, пока человек не ув�
 | `POST /api/projector` `{"pattern":"grid"}` | black / white / grid / focus / circle / center / vial |
 | `POST /api/calibration` `{"offset_px":12,"vial_px":400,"show":"center"}` | центровка и ширина флакона |
 | `GET /api/state`, `GET /api/events` | состояние (events = поток SSE, 2 раза в секунду) |
-| `GET /api/wifi?scan=1`, `POST /api/wifi` `{"ssid":…,"psk":…}` | Wi-Fi (только в SpinOS) |
 
 Без пароля: страницу видят все в твоей Wi-Fi сети. Для домашней сети это нормально.
 

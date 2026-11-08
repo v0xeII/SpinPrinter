@@ -4,8 +4,8 @@
 #
 #     curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash
 #
-# Downloads SpinPi + SpinProj, installs them as a service, makes the projector stay black and
-# frees the UART pins for the ESP32 (wires), then reboots. Safe to run again (updates).
+# Downloads SpinPi + SpinProj, installs them as a service, makes the projector stay black,
+# then reboots. Safe to run again (updates).
 set -euo pipefail
 REPO="${SPINPRINTER_REPO:-v0xeII/SpinPrinter}"
 BRANCH="${SPINPRINTER_BRANCH:-main}"
@@ -22,6 +22,6 @@ cp -r "$TMP"/*/SpinPi "$TMP"/*/SpinProj "$SRC/"
 bash "$SRC/SpinPi/pi_setup.sh"
 bash "$SRC/SpinPi/install.sh"
 echo
-echo "== Rebooting in 10 s (the projector and UART settings need it). Ctrl+C to stay."
+echo "== Rebooting in 10 s (the projector settings need it). Ctrl+C to stay."
 sleep 10
 reboot

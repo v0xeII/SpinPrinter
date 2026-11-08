@@ -320,16 +320,6 @@ class FakeWarm:
         return 0.0
 
 
-class FakeNet:
-    exe = ""
-
-    def status(self):
-        return {"available": False, "mode": "none"}
-
-    def scan(self):
-        return []
-
-
 def make_printer(tmp, proj=None, **settings):
     data = os.path.join(tmp, "data")
     os.makedirs(data, exist_ok=True)
@@ -435,7 +425,7 @@ class Api(Tmp):
         super().setUp()
         self.pr, self.usb = make_printer(self.tmp)
         app = spinpi.App()
-        app.lib, app.printer, app.net, app.proj = self.pr.lib, self.pr, FakeNet(), self.pr.proj
+        app.lib, app.printer, app.proj = self.pr.lib, self.pr, self.pr.proj
         spinpi.Handler.app = app
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), spinpi.Handler)
         self.srv.daemon_threads = True

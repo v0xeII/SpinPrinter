@@ -9,7 +9,7 @@
   3. ESP «завис» посреди печати: свет гаснет, печать остановлена с ошибкой;
   4. «Стоп» со страницы посреди печати;
   5. тестовые картинки проектора;
-  6. первый запуск: своя Wi-Fi сеть, QR-код для телефона, выбор домашней сети (поддельный spinnet);
+  6. печать из SpinSlicer ждёт «да» на экране принтера; одно «←» на экране печати не останавливает её;
   7. файл .spin по Wi-Fi, нарезанный для другого направления: кадры в обратном порядке.
 Это проверка логики и связи. Реальное время проверяется только на самой Pi (spinproj bench).
 """
@@ -52,8 +52,6 @@ class Bench:
         self.log = open(os.path.join(self.dir, "selftest.log"), "w")
         self.esp, tty = common.start_esp(["--headless", "--inject", self.inject], log=self.log)
         self.port = common.free_port(18080)
-        os.environ["SPINNET"] = os.path.join(common.ROOT, "dev", "fake_spinnet.sh")
-        os.environ["SPINNET_STATE"] = os.path.join(self.dir, "net")
         self.pi = common.start_pi(tty, self.port, data, self.usb_one, out="null", projector="640x400", log=self.log)
         self.url = f"http://127.0.0.1:{self.port}"
 
@@ -171,23 +169,29 @@ def main():
         time.sleep(0.5)
         check("SpinProj не ругался на картинки", "не читается картинка" not in open(b.log.name).read())
 
-        print("\n6. Первый запуск: своя Wi-Fi сеть")
-        w = b.api("/api/wifi?scan=1")
-        check("страница видит режим точки доступа и сети вокруг", w.get("mode") == "ap" and len(w.get("networks", [])) == 2,
-              ", ".join(n["ssid"] for n in w.get("networks", [])))
-        log = open(b.log.name).read()
-        check("экран ESP получил QR-код для входа в сеть принтера", "PI > URL WIFI:T:nopass;S:SpinSlicer-TEST;;" in log)
-        c = http.client.HTTPConnection("127.0.0.1", b.port, timeout=5)  # what Android asks on joining a Wi-Fi
-        c.request("GET", "/generate_204", headers={"Host": "connectivitycheck.gstatic.com"})
-        r = c.getresponse()
-        check("телефон сам открывает страницу (captive portal)", r.status == 302 and r.getheader("Location") == "http://192.168.4.1/",
-              f"{r.status} → {r.getheader('Location')}")
-        r = b.api("/api/wifi", {"ssid": "Домашняя сеть", "psk": "12345678"})
-        check("выбор домашней сети принят", r["ok"], r.get("error") or "")
-        r = b.api("/api/wifi", {"ssid": "x", "psk": "123"})
-        check("слишком короткий пароль отклонён", not r["ok"], r.get("error") or "")
+        print("\n6. Печать из SpinSlicer: «да» на экране принтера")
+        r = b.api("/api/print", {"id": fid, "revs": 3, "delay_s": 0.5, "confirm": True})
+        check("задание принято и ждёт экрана", r["ok"] and r["request"]["state"] == "waiting_confirm", r.get("error") or "")
+        time.sleep(1.5)
+        check("пока нет «да», ничего не крутится", b.state()["state"] == "idle")
+        check("экран спросил «Печатать?»", "PI > ASK 3 " in open(b.log.name).read())
+        b.keys("KEY OK", gap=0.2)  # → да
+        s = b.wait(lambda s: s["state"] in ("print", "error"), 30)
+        check("«да» на экране запустило печать", s["state"] == "print" and s["request"]["state"] == "started", s["msg"])
+        time.sleep(1.0)
+        b.keys("KEY BACK", gap=1.0)  # one ← only asks
+        check("одно «←» не остановило печать", b.state()["state"] == "print", b.state()["state"])
+        b.keys("KEY BACK", gap=0)  # the second one within 3 s stops
+        s = b.wait(lambda s: s["state"] != "print", 5, step=0.05)
+        check("второе «←» остановило, и сказано кто", s["state"] == "idle" and "экрана" in s["msg"], s["msg"])
+        b.api("/api/print", {"id": fid, "confirm": True})
+        time.sleep(1.0)
+        b.keys("KEY BACK", gap=1.0)  # ← нет
+        s = b.state()
+        check("«нет» на экране отменило задание", s["request"]["state"] == "cancelled" and s["state"] == "idle",
+              s["request"]["state"])
 
-        print("\n7. Файл .spin по Wi-Fi, нарезан для вращения в другую сторону")
+        print("\n7. Файл .spin по сети, нарезан для вращения в другую сторону")
         spin = os.path.join(b.dir, "reverse.spin")
         video = open(os.path.join(b.usb, FILE), "rb").read()
         meta = {"format": "spin", "version": 1, "name": "reverse",

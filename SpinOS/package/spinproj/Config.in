@@ -1,8 +1,0 @@
-config BR2_PACKAGE_SPINPROJ
-	bool "spinproj"
-	depends on BR2_TOOLCHAIN_HAS_THREADS
-	select BR2_PACKAGE_LZ4
-	select BR2_PACKAGE_LIBDRM
-	help
-	  Shows the frame that belongs to the vial angle on every vsync
-	  (DRM/KMS page flip). Part of SpinSlicer.

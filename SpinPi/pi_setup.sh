@@ -1,8 +1,6 @@
 #!/bin/bash
 # Raspberry Pi OS settings for the printer (idempotent; used by get.sh, needs a reboot):
 #   * the projector stays black: no rainbow splash, no boot text, no blinking cursor
-#   * GPIO14/15 (pins 8, 10) are the three-wire link to the ESP32: the PL011 UART goes there
-#     (Pi 3/4/Zero 2 W: Bluetooth off; Pi 5: uart0 on), no Linux console or login on it
 #   * CPU 3 is kept free for SpinProj (isolcpus=3)
 set -euo pipefail
 BOOT=/boot/firmware
@@ -13,7 +11,7 @@ cp -n "$CMD" "$CMD.before-spinprinter" 2>/dev/null || true
 cp -n "$CFG" "$CFG.before-spinprinter" 2>/dev/null || true
 
 line="$(head -n1 "$CMD")"
-for w in console=tty1 console=serial0,115200 console=ttyAMA0,115200 console=ttyS0,115200 splash; do
+for w in console=tty1 splash; do
 	line="$(echo " $line " | sed "s/ $w / /g")"
 done
 for w in quiet loglevel=0 logo.nologo vt.global_cursor_default=0 consoleblank=0 isolcpus=3; do
@@ -25,19 +23,10 @@ if ! grep -q "^# SpinPrinter" "$CFG"; then
 	cat >>"$CFG" <<'CFGEOF'
 
 [all]
-# SpinPrinter: the projector stays black from power-on; GPIO14/15 are the link to the ESP32
+# SpinPrinter: the projector stays black from power-on (the ESP32 is on the USB cable)
 disable_splash=1
 boot_delay=0
 dtparam=audio=off
-enable_uart=1
-dtoverlay=disable-bt
-[pi5]
-# Pi 5: GPIO14/15 are UART0 (/dev/ttyAMA0); /dev/serial0 there is the debug connector
-dtparam=uart0=on
-[all]
 CFGEOF
 fi
-for unit in serial-getty@ttyAMA0 serial-getty@serial0 serial-getty@ttyS0 hciuart; do
-	systemctl mask "$unit.service" >/dev/null 2>&1 || true
-done
 echo "pi_setup: done (reboot to apply)"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# SpinPi installer for Raspberry Pi OS Lite (the quick way to try the printer before SpinOS).
+# SpinPi installer for Raspberry Pi OS Lite.
 # Copy the whole SpinPrinter folder to the Pi, then:  bash SpinPi/install.sh
 set -e
 cd "$(dirname "$0")"
