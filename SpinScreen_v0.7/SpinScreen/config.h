@@ -9,28 +9,28 @@
 // ============================================================
 #pragma once
 
-#define FW_VERSION "0.8.0"
+#define FW_VERSION "0.8.1"
 
 // ---------- Экран ST7789 240x320 (SPI) ----------
 //  экран  ->  ESP32-S3
 //  GND    ->  GND
 //  VCC    ->  3V3   (не 5V!)
-//  SCL    ->  12
-//  SDA    ->  11
-//  RES    ->  8
-//  DC     ->  9
-//  CS     ->  10
-//  BLK    ->  7     (подсветка, яркость через PWM)
-#define PIN_TFT_SCL 12
-#define PIN_TFT_SDA 11
-#define PIN_TFT_RES 8
-#define PIN_TFT_DC  9
-#define PIN_TFT_CS  10
-#define PIN_TFT_BLK 7
+//  SCL    ->  43    (TX платы)
+//  SDA    ->  44    (RX платы)
+//  RES    ->  1
+//  DC     ->  2
+//  CS     ->  3
+//  BLK    ->  4     (подсветка, яркость через PWM)
+#define PIN_TFT_SCL 43
+#define PIN_TFT_SDA 44
+#define PIN_TFT_RES 1
+#define PIN_TFT_DC  2
+#define PIN_TFT_CS  3
+#define PIN_TFT_BLK 4
 
 #define TFT_ROTATION 1   // 1 или 3: экран лёжа (320 x 240), 3 = перевёрнут на 180°
 #define TFT_SPI_MHZ 40   // мусор или полосы на длинных проводах: 20
-#define TFT_SPI_MODE 0
+#define TFT_SPI_MODE 3   // режим SPI 3 для этой проводки (как в пресете breadboard 0.7.1)
 #define TFT_INVERT 1     // цвета «негатив»: 0
 #define TFT_BGR 0        // красный и синий перепутаны: 1
 
@@ -38,22 +38,22 @@
 //  джойстик  ->  ESP32-S3
 //  GND       ->  GND
 //  +5V       ->  3V3   (не 5V! иначе на входы ESP придёт больше 3,3 В)
-//  VRx       ->  4     (аналоговый вход, ADC1)
-//  VRy       ->  5     (аналоговый вход, ADC1)
-//  SW        ->  6     (нажатие на ручку)
+//  VRx       ->  13    (аналоговый вход, ADC2)
+//  VRy       ->  11    (аналоговый вход, ADC2)
+//  SW        ->  12    (нажатие на ручку)
 // Вверх / вниз = по списку, вправо или нажать = OK, влево или долго нажать = назад.
 // Центр запоминается при включении: в этот момент ручку не трогать.
-#define PIN_JOY_X   4
-#define PIN_JOY_Y   5
-#define PIN_JOY_SW  6
+#define PIN_JOY_X   13
+#define PIN_JOY_Y   11
+#define PIN_JOY_SW  12
 #define JOY_SWAP_XY  0  // 1, если вверх/вниз срабатывает при наклоне вбок
 #define JOY_INVERT_Y 0  // 1, если вверх и вниз перепутаны
 #define JOY_INVERT_X 0  // 1, если OK и назад перепутаны
 
 // ---------- Шаговый мотор (TMC2209 в режиме STEP/DIR) ----------
-#define PIN_STEP 1
-#define PIN_DIR  2
-#define PIN_EN   13   // EN у драйвера: LOW = мотор включён
+#define PIN_STEP 5
+#define PIN_DIR  6
+#define PIN_EN   7    // EN у драйвера: LOW = мотор включён
 
 // Значения по умолчанию. Потом всё меняется прямо в меню «Мотор» и запоминается.
 #define MOTOR_STEPS_PER_REV 200  // обычный NEMA17 = 200 шагов (1.8°)

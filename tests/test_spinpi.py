@@ -585,7 +585,7 @@ class EspLink(unittest.TestCase):
     def test_lines_come_whole(self):
         r = spinpi.Lines()
         self.assertEqual(r.feed(b"POS 12.5 1.5"), [])
-        self.assertEqual(r.feed(b"00 1\r\nPONG SpinScreen 0.8.0\nEV ST"), ["POS 12.5 1.500 1", "PONG SpinScreen 0.8.0"])
+        self.assertEqual(r.feed(b"00 1\r\nPONG SpinScreen 0.8.1\nEV ST"), ["POS 12.5 1.500 1", "PONG SpinScreen 0.8.1"])
         self.assertEqual(r.feed(b"OP\n"), ["EV STOP"])
 
     def test_endless_line_is_dropped(self):
