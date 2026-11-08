@@ -43,7 +43,18 @@ SPIN_EXT = ".spin"  # SpinSlicer's one-file print: a stored ZIP with spin.json, 
 PRINT_EXT = VIDEO_EXT + (SPIN_EXT,)
 SPIN_VERSION = 1  # the newest .spin version this SpinPi reads
 API_VERSION = 1
+# what this SpinPi can do, in GET /api/printer: a slicer checks before it relies on it
+#   confirm  POST /api/print {"confirm": true} waits for a yes on the printer's screen (0.8.0)
+#   job_seq  /api/state: job.seq and request.job_seq tell which print is which (0.8.2)
+FEATURES = ["confirm", "job_seq"]
+ASK_FIRMWARE = (0, 8, 0)  # the first SpinScreen that shows "Print?" (ASK)
 ROTATIONS = ("ccw_from_top", "cw_from_top")
+
+
+def version_tuple(text):
+    """"0.8.1" / "0.8.1-test" -> (0, 8, 1); None when there is no version in it."""
+    m = re.match(r"\s*v?(\d+)\.(\d+)(?:\.(\d+))?", text or "")
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)) if m else None
 
 
 def log(*a):
@@ -116,7 +127,19 @@ class Esp:
         self.port = ""
         self._next = 0  # which candidate to try next
         self.last_pong = 0.0
+        self.events = queue.Queue()
         threading.Thread(target=self._run, daemon=True).start()
+        threading.Thread(target=self._events, daemon=True).start()
+
+    def _events(self):
+        """EV lines one after another, in the order the board sent them. (A thread each let a burst of
+        EV OFFSET from a held stick land out of order, the last one applied being an older value.)"""
+        while True:
+            ev = self.events.get()
+            try:
+                self.on_event(ev)
+            except Exception as e:  # noqa: BLE001 - one bad event must not stop the rest
+                log("ESP event failed:", ev, e)
 
     def _candidates(self):
         if self.port_hint:  # --serial: one port, or several separated by commas
@@ -217,7 +240,10 @@ class Esp:
         elif line.startswith("READY"):  # ESP rebooted
             self.hello()
         elif line.startswith("EV "):
-            threading.Thread(target=self.on_event, args=(line[3:],), daemon=True).start()
+            if line == "EV STOP":  # never waits behind a slow event (a list of a big USB stick)
+                threading.Thread(target=self.on_event, args=("STOP",), daemon=True).start()
+            else:
+                self.events.put(line[3:])
 
     def send(self, line):
         s = self.ser
@@ -1051,6 +1077,9 @@ class Printer:
             self.settings["printer_id"] = "spinpi-" + uuid.uuid4().hex[:8]
             self.save_settings()
         self.settings.setdefault("printer_name", "")
+        # the vial calibration was really made (on the screen, the page or from the slicer): until
+        # then offset 0 / width 400 are only defaults and the profile does not offer them as values
+        self.settings.setdefault("calibrated", self.settings["vial_px"] != 400 or self.settings["offset_px"] != 0)
         self.settings.setdefault("prints", 0)
         self.history = load_json(self.history_path, [])
         self.on_profile = None  # called after the profile changes (mDNS name)
@@ -1067,6 +1096,8 @@ class Printer:
         self.motor_angle = 0.0
         self.pattern = "black"
         self.esp_list = []
+        self.lock = threading.RLock()  # start / ask / answer: one at a time
+        self.job_seq = 0  # +1 for every print started: /api/state says which print is which
         self.angle_mode = getattr(proj, "engine", "mpv") == "angle"
         self.last_pos = None  # (angle, rpm, at_speed, t_mid, received) from the job's angle feeder
 
@@ -1129,14 +1160,17 @@ class Printer:
         s, p = self.settings, self.settings["profile"]
         hz = getattr(self.proj, "hz", None) or s.get("display_fps")
         return {
-            "api": API_VERSION, "spin_version": SPIN_VERSION,
+            "api": API_VERSION, "spin_version": SPIN_VERSION, "features": FEATURES,
             "id": s["printer_id"], "name": s.get("printer_name") or socket.gethostname(),
             "projector": {"width": self.pw, "height": self.ph, "hz": hz,
                           "irradiance_mw_cm2": p.get("irradiance_mw_cm2"), "contrast": p.get("contrast")},
             "vial": {"diameter_mm": p.get("vial_diameter_mm"), "wall_mm": p.get("vial_wall_mm"),
                      "n_glass": p.get("vial_n")},
-            "calibration": {"offset_px": s["offset_px"], "center_offset_px": [s["offset_px"], 0],
-                            "vial_width_px": s["vial_px"]},
+            # null until calibrated: a default is not a measurement, the slicer keeps its own
+            "calibration": ({"offset_px": s["offset_px"], "offset_x_px": s["offset_px"],
+                             "center_offset_px": [s["offset_px"], 0], "vial_width_px": s["vial_px"]}
+                            if s.get("calibrated") else
+                            {"offset_px": None, "offset_x_px": None, "center_offset_px": None, "vial_width_px": None}),
             "motor": {"gear": p.get("motor_gear"), "direction": self.motor_dir},
             "exposure": {"factor": s["factor"]},
             "software": {"spinpi": VERSION, "spinscreen": self.esp.version or None,
@@ -1185,7 +1219,8 @@ class Printer:
              "history": self.history[-8:], "version": VERSION, "request": self.request_view(),
              "engine": "angle" if self.angle_mode else "mpv"}
         if j:
-            d["job"] = {k: j.get(k) for k in ("id", "file", "rpm", "revs", "time_s", "factor", "plan_revs", "reversed")}
+            d["job"] = {k: j.get(k) for k in ("seq", "id", "file", "rpm", "revs", "time_s", "factor", "plan_revs",
+                                              "reversed")}
             d["job"].update(turn=j.get("turn", 0), left_s=j.get("left_s", j["time_s"]),
                             progress=j.get("progress", 0.0))
         return d
@@ -1213,11 +1248,19 @@ class Printer:
     NO_SCREEN = "экран принтера не подключён"
 
     def ask(self, fid, revs=None, factor=None, delay_s=None):
+        with self.lock:
+            return self._ask(fid, revs, factor, delay_s)
+
+    def _ask(self, fid, revs, factor, delay_s):
         err, f, _path, p = self._check(fid, revs, factor)
         if err:
             return err
         if not self.esp.connected:
             return self.NO_SCREEN
+        fw = version_tuple(self.esp.version)
+        if fw is not None and fw < ASK_FIRMWARE:  # an older board ignores ASK: nobody would ever be asked
+            need = ".".join(map(str, ASK_FIRMWARE))
+            return f"прошивка платы {self.esp.version} не спрашивает «Печатать?»: прошей плату {need} или новее"
         self.expire_request(replaced=True)
         self.request = {"state": "waiting_confirm", "id": fid, "name": f["name"], "revs": p["revs"],
                         "time_s": p["time_s"], "error": None, "t": time.monotonic(),
@@ -1228,16 +1271,19 @@ class Printer:
         return None
 
     def answer(self, yes):
-        r = self.request
-        if not r or r["state"] != "waiting_confirm":
-            return
-        if not yes:
-            r["state"] = "cancelled"
-            log("print request: cancelled on the screen")
-            return
-        r["state"] = "starting"
-        err = self.start(*r["args"])
-        r["state"], r["error"] = ("started", None) if err is None else ("error", err)
+        with self.lock:
+            r = self.request
+            if not r or r["state"] != "waiting_confirm":
+                return
+            if not yes:
+                r["state"] = "cancelled"
+                log("print request: cancelled on the screen")
+                return
+            r["state"] = "starting"
+            err = self.start(*r["args"])
+            if err is None:
+                r["job_seq"] = self.job["seq"]
+            r["state"], r["error"] = ("started", None) if err is None else ("error", err)
         if err:
             self.esp.send(f"STATE ERROR {err}")
 
@@ -1253,6 +1299,13 @@ class Printer:
         return {k: v for k, v in r.items() if k not in ("t", "args")} if r else None
 
     def start(self, fid, revs=None, factor=None, delay_s=None):
+        # Two starts at once (a yes on the screen and Print on the page) both found the printer idle,
+        # because the job thread set "wait" only once it ran: two threads drove one motor. Now the
+        # check and "wait" happen together, under the lock.
+        with self.lock:
+            return self._start(fid, revs, factor, delay_s)
+
+    def _start(self, fid, revs, factor, delay_s):
         err, f, path, p = self._check(fid, revs, factor)
         if err:
             return err
@@ -1266,6 +1319,9 @@ class Printer:
                         delay_s=delay_s, frames_per_rev=f.get("frames_per_rev"), phase=f.get("frame0_angle_deg") or 0.0,
                         format=f.get("format", "video"), plan=f.get("plan") if isinstance(f.get("plan"), dict) else None,
                         resin=f.get("resin"), printer_profile_id=f.get("printer_profile_id"))
+        self.job_seq += 1
+        self.job["seq"] = self.job_seq
+        self.state, self.msg = "wait", ""  # busy from this moment, not from when the thread runs
         self.stop_flag.clear()
         self.stop_reason = ""
         threading.Thread(target=self._run_angle if self.angle_mode else self._run, daemon=True).start()
@@ -1340,13 +1396,15 @@ class Printer:
             self.settings["offset_px"] = max(-400, min(400, int(offset)))
         if vial is not None:
             self.settings["vial_px"] = max(20, min(4000, int(vial)))
+        if offset is not None or vial is not None:
+            self.settings["calibrated"] = True
         self.save_settings()
         self.esp.send(f"CAL {self.settings['offset_px']} {self.settings['vial_px']}")
         if self.pattern != "black" and not self.busy():
             self.show_pattern(self.pattern)
 
     def send_list(self):
-        files = [f for f in self.lib.list() if f.get("rpm") and not f.get("error")][:16]
+        files = [f for f in self.lib.list() if f.get("rpm") and not f.get("error")][:32]  # SpinScreen keeps 32
         self.esp_list = [f["id"] for f in files]
         s, e = self.settings, self.esp
         e.send(f"FL BEGIN {len(files)} {100 * (s['factor'] - 1):.0f} {s['delay_s']:.0f} {int(s['default_revs'])}")

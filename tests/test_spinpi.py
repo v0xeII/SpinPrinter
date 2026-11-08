@@ -262,7 +262,7 @@ class LibraryTest(Tmp):
 # ------------------------------------------------------------------------------------------ fakes
 class FakeEsp:
     def __init__(self):
-        self.sent, self.connected, self.version, self.greeting = [], True, "0.7-test", []
+        self.sent, self.connected, self.version, self.greeting = [], True, "0.8.1-test", []
         self.rpm, self.angle = 0.0, 0.0
 
     def send(self, line):
@@ -487,9 +487,17 @@ class Api(Tmp):
         self.assertTrue(p["id"].startswith("spinpi-"))
         self.assertEqual((p["projector"]["width"], p["projector"]["height"]), (1280, 800))
         self.assertEqual(p["motor"]["direction"], "ccw_from_top")
+        self.assertIn("confirm", p["features"])
+        self.assertIn("job_seq", p["features"])
+        # not calibrated yet: the defaults (offset 0, width 400) are not offered as measurements
+        self.assertIsNone(p["calibration"]["vial_width_px"])
+        self.assertIsNone(p["calibration"]["center_offset_px"])
+        self.req("POST", "/api/calibration", {"vial_px": 400, "offset_px": -3})
+        code, p, _ = self.req("GET", "/api/printer")
         self.assertEqual(p["calibration"]["vial_width_px"], 400)
+        self.assertEqual(p["calibration"]["offset_x_px"], -3)
         self.assertEqual(p["software"]["spinpi"], spinpi.VERSION)
-        self.assertEqual(p["software"]["spinscreen"], "0.7-test")
+        self.assertEqual(p["software"]["spinscreen"], "0.8.1-test")
         pid = p["id"]
         code, r, _ = self.req("POST", "/api/printer", {"name": "Шкаф", "irradiance_mw_cm2": "4.1", "vial_diameter_mm": 25,
                                                       "vial_wall_mm": 1.2, "vial_n": 1.47, "contrast": 1000,
@@ -557,6 +565,32 @@ class Api(Tmp):
         self.assertEqual(code, 409)
         self.assertFalse(r["ok"])
 
+    def test_old_firmware_is_not_asked(self):
+        # a board before 0.8.0 ignores ASK: the slicer would wait 10 minutes for a question never shown
+        self.req("PUT", "/api/files/c.spin", spin_bytes())
+        self.pr.esp.version = "0.7.1"
+        code, r, _ = self.req("POST", "/api/print", {"id": "lib/c.spin", "confirm": True})
+        self.assertFalse(r["ok"])
+        self.assertIn("0.8.0", r["error"])
+        self.assertFalse([x for x in self.pr.esp.sent if x.startswith("ASK ")])
+
+    def test_state_says_which_print(self):
+        # the slicer follows its own print: the request names the job it started
+        self.ask()
+        self.pr.on_esp_event("GO")
+        code, st, _ = self.req("GET", "/api/state")
+        self.assertEqual(st["request"]["state"], "started")
+        self.assertEqual(st["request"]["job_seq"], st["job"]["seq"])
+        self.assertIn(st["state"], ("wait", "print", "done"))  # never "idle" or the last print's "done"
+        self.assertEqual(wait_state(self.pr, ("done", "error")), "done", self.pr.msg)
+        first = st["job"]["seq"]
+        self.ask()
+        self.pr.on_esp_event("GO")
+        code, st, _ = self.req("GET", "/api/state")
+        self.assertEqual(st["request"]["job_seq"], first + 1)
+        self.assertEqual(st["job"]["seq"], first + 1)
+        wait_state(self.pr, ("done", "error"))
+
     def test_bad_request_is_refused_at_once(self):
         code, r, _ = self.req("POST", "/api/print", {"id": "lib/nothing.spin", "confirm": True})
         self.assertFalse(r["ok"])
@@ -612,6 +646,72 @@ class EspLink(unittest.TestCase):
             self.assertEqual(esp._candidates(), ["/dev/ttyACM0"])
         finally:
             spinpi.glob.glob, spinpi.os.path.exists = real_glob, real_exists
+
+
+class OneStartAtATime(Tmp):
+    def test_busy_as_soon_as_start_returns(self):
+        pr, usb = make_printer(self.tmp)
+        make_spin(os.path.join(usb, "cube.spin"))
+        fid = pr.lib.list()[0]["id"]
+        self.assertIsNone(pr.start(fid, revs=1))
+        self.assertTrue(pr.busy())  # before the job thread has run
+        self.assertEqual(pr.start(fid, revs=1), "busy")
+        wait_state(pr, ("done", "error"))
+
+    def test_two_starts_at_once(self):
+        # a yes on the screen and Print on the page at the same moment: one print, not two
+        pr, usb = make_printer(self.tmp)
+        make_spin(os.path.join(usb, "cube.spin"))
+        fid = pr.lib.list()[0]["id"]
+        go, results = threading.Barrier(4), []
+        def press():
+            go.wait()
+            results.append(pr.start(fid, revs=1))
+        threads = [threading.Thread(target=press) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(results.count(None), 1, results)
+        self.assertEqual(results.count("busy"), 3, results)
+        wait_state(pr, ("done", "error"))
+
+
+class EspEvents(unittest.TestCase):
+    def make(self, on_event):
+        esp = spinpi.Esp.__new__(spinpi.Esp)  # no reader thread
+        esp.on_event, esp.events = on_event, queue.Queue()
+        threading.Thread(target=esp._events, daemon=True).start()
+        return esp
+
+    def test_in_the_order_sent(self):
+        got = []
+        def on_event(ev):
+            time.sleep(0.002 if int(ev.split()[1]) % 2 else 0.0)
+            got.append(ev)
+        esp = self.make(on_event)
+        sent = [f"OFFSET {i}" for i in range(30)]  # the stick held on "Centering"
+        for ev in sent:
+            esp._handle("EV " + ev)
+        t = time.time()
+        while len(got) < 30 and time.time() - t < 5:
+            time.sleep(0.01)
+        self.assertEqual(got, sent)
+
+    def test_stop_does_not_wait(self):
+        got, slow = [], threading.Event()
+        def on_event(ev):
+            if ev == "LIST":
+                slow.wait(5)  # a big USB stick being read
+            got.append(ev)
+        esp = self.make(on_event)
+        esp._handle("EV LIST")
+        esp._handle("EV STOP")
+        t = time.time()
+        while "STOP" not in got and time.time() - t < 2:
+            time.sleep(0.01)
+        self.assertEqual(got, ["STOP"])
+        slow.set()
 
 
 class StopReason(Tmp):
