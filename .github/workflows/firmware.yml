@@ -10,7 +10,7 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  ESP32_CORE: "3.3.10"
+  ESP32_CORE: "3.3.8"   # 3.3.10: its esp-rv32 toolchain download kept failing (504)
   FQBN: "esp32:esp32:esp32s3:CDCOnBoot=cdc"
 jobs:
   build:
