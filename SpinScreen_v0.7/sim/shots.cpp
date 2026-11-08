@@ -84,11 +84,11 @@ int main(int argc, char** argv) {
   shot("boot");
   frames(3500);
   shot(axo ? "main_axo" : "main");
-  if (axo) {  // Spinny beside the menu: the main page and the service list are enough
+  if (axo) {  // Spinny beside the menu: the main page and the settings list are enough
     key(K_DOWN);
     key(K_DOWN);
     key(K_OK, 900);
-    shot("service_axo");
+    shot("settings_axo");
     return 0;
   }
   key(K_DOWN, 700);
@@ -131,26 +131,26 @@ int main(int argc, char** argv) {
   shot("connect");
   key(K_OK, 900);
   key(K_DOWN);
-  key(K_OK, 900);  // Сервис
-  shot("service");
-  key(K_DOWN);
-  key(K_OK, 900);  // Мотор
+  key(K_OK, 900);  // Настройки: the five groups
+  shot("settings");
+  key(K_OK, 900);  // Вращение
   key(K_OK, 1500);  // Вращение: вкл
-  shot("motor");
+  shot("spin");
   key(K_OK);  // off again
   key(K_DOWN);
   key(K_OK, 800);  // edit the speed
   shot("edit_speed");
   key(K_OK);
-  key(K_BACK, 900);
+  key(K_BACK, 900);  // back to the groups
   for (int i = 0; i < 4; i++) key(K_DOWN, 200);
+  key(K_OK, 900);  // Система
+  key(K_DOWN, 200);
+  key(K_DOWN, 200);
   key(K_OK, 1200);  // О принтере
   shot("about");
-  key(K_OK, 900);  // back on the service page
+  key(K_OK, 900);  // back on the system page
   key(K_UP);
-  key(K_OK, 900);  // Raspberry Pi
-  key(K_DOWN);
-  key(K_OK, 700);  // Выключить -> Точно?
+  key(K_OK, 700);  // Выключить Pi -> Точно?
   shot("confirm");
   key(K_BACK, 900);
   // a print sent from SpinSlicer: the yes on the printer

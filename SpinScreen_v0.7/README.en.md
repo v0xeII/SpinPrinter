@@ -15,14 +15,14 @@ of the main page, menus in Russian and English. Spinny the axolotl is optional.
 - **Print?** A print sent from SpinSlicer does not start by itself: the screen shows what came (name,
   turns, time) and waits. Right = print, left = cancel.
 - **Connect**: QR code of the printer page.
-- **Service**:
+- **Settings**: five groups, each its own page (no "Back" row: tilt left or long press goes back):
+  - Spin: test spin, speed, direction (live tachometer on the left).
+  - Display: brightness, language, dark screen while printing; **Home**: Card (default: PRINT as a big card
+    on top) or Axolotl (Spinny at the side); **Colour** of the axolotl: pink, gold, wild, black, blue, RGB.
   - Projector: Black, White, Grid, Focus, Circle, Center, Vial width.
-  - Motor: test spin, speed, direction, ramp, microsteps, steps per turn, gear, "exactly 1 turn", zero; a live tachometer.
-  - Screen: brightness, language, dark screen while printing.
-  - Customize: **Home**: Card (default: PRINT as a big card on top) or Axolotl (Spinny at the side);
-    **Colour** of the axolotl: pink, gold, wild, black, blue, RGB.
-  - Raspberry Pi: reboot or shut down (with confirmation).
-  - About.
+  - Motor: ramp, microsteps, steps per turn, gear, "exactly 1 turn", zero. Changes made while the motor
+    spins are applied when it stops.
+  - System: reboot or shut down the Raspberry Pi (with confirmation); About.
 
 **Joystick:** up / down = the list (hold to scroll), right or a press = OK, left or a long press =
 back. On the print screen one ← only asks ("← again = stop"); a second ← within 3 s stops. A bump of
@@ -95,7 +95,7 @@ time, so there is no 16/17 ms shimmer. It drops to 30 fps only when everything i
 on a steady 30 if the board cannot draw 60. Drawing is cheap: fast inline math instead of library
 calls, span-skipping shape fills, Spinny's body as one shape, `-O2` for the drawing code, and only
 changed areas go to the screen (DMA). Measured in the Espressif QEMU: ~1.7–1.9 million instructions
-per frame (v0.6: ~9.7–11.9 million). Real frame time on your board: Service → About.
+per frame (v0.6: ~9.7–11.9 million). Real frame time on your board: Settings → About.
 
 ## Spinny
 
@@ -130,7 +130,7 @@ At power-up the board prints `READY SpinScreen 0.8.3 st7789_240x320 320x240 joys
 |---|---|
 | `EV LIST` · `EV PRINT i turns correction% pause` | list opened · PRINT pressed |
 | `EV RESULT under/ok/over` | answer to "How did it come out?" |
-| `EV PATTERN name` · `EV OFFSET px` · `EV VIALW px` | Service → Projector |
-| `EV REBOOT` / `EV POWEROFF` · `EV STOP` | Service → Raspberry Pi · ← twice within 3 s on the print screen |
+| `EV PATTERN name` · `EV OFFSET px` · `EV VIALW px` | Settings → Projector |
+| `EV REBOOT` / `EV POWEROFF` · `EV STOP` | Settings → Raspberry Pi · ← twice within 3 s on the print screen |
 | `EV GO` / `EV NO` | the answer to "Print?" |
 | `EV SPIN 1/0`, `EV RPM 9.5` | motor or speed changed on the screen |

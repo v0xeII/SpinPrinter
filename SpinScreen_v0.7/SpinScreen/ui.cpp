@@ -48,38 +48,44 @@ static float easeOut(float x) {
 
 // ================================================================ menu model
 enum ItemId {
-  I_PRINT, I_CONNECT, I_SERVICE,
-  I_PROJ, I_MOTOR, I_SCREEN, I_PIMENU, I_ABOUT, I_BACK,
+  I_PRINT, I_CONNECT, I_SETTINGS,
+  I_ABOUT,
   I_P_BLACK, I_P_WHITE, I_P_GRID, I_P_FOCUS, I_P_CIRCLE, I_P_CENTER, I_P_VIAL,
   I_ROT, I_SPEED, I_DIR, I_ACCEL, I_MICRO, I_STEPS, I_GEAR, I_ONEREV, I_ZERO,
   I_BRIGHT, I_LANG, I_DARK,
   I_REBOOT, I_POWEROFF,
-  I_AXO, I_AXO_SHOW, I_AXO_COLOR,
+  I_AXO_SHOW, I_AXO_COLOR,
   I_SU_TURNS, I_SU_FACTOR, I_SU_DELAY,  // print setup rows
+  I_G_SPIN, I_G_DISPLAY, I_G_PROJ, I_G_MOTOR, I_G_SYSTEM,  // the sub-menus of Settings
   I_FILE,                          // a video in the list
 };
 static const Str ITEM_NAME[] = {
     S_PRINT, S_CONNECT, S_SERVICE,
-    S_PROJECTOR, S_MOTOR, S_SCREEN, S_PI_MENU, S_ABOUT, S_BACK,
+    S_ABOUT,
     S_P_BLACK, S_P_WHITE, S_P_GRID, S_P_FOCUS, S_P_CIRCLE, S_P_CENTER, S_P_VIAL,
     S_ROTATION, S_SPEED, S_DIRECTION, S_ACCEL, S_MICROSTEP, S_STEPS_REV, S_GEAR, S_ONEREV, S_ZERO,
     S_BRIGHT, S_LANG, S_DARK,
     S_REBOOT, S_POWEROFF,
-    S_AXO, S_AXO_SHOW, S_AXO_COLOR,
+    S_AXO_SHOW, S_AXO_COLOR,
     S_SU_TURNS, S_SU_FACTOR, S_SU_DELAY,
+    S_G_SPIN, S_G_DISPLAY, S_G_PROJ, S_G_MOTOR, S_G_SYSTEM,
     S_FILES,
 };
-enum PageId { PG_MAIN, PG_SERVICE, PG_PROJ, PG_MOTOR, PG_SCREEN, PG_PI, PG_AXO, PG_FILES };
-static const ItemId MAIN_ITEMS[] = {I_PRINT, I_CONNECT, I_SERVICE};
-static const ItemId SERVICE_ITEMS[] = {I_PROJ, I_MOTOR, I_SCREEN, I_AXO, I_PIMENU, I_ABOUT, I_BACK};
-static const ItemId AXO_ITEMS[] = {I_AXO_SHOW, I_AXO_COLOR, I_BACK};
-static const ItemId PROJ_ITEMS[] = {I_P_BLACK, I_P_WHITE, I_P_GRID, I_P_FOCUS, I_P_CIRCLE, I_P_CENTER, I_P_VIAL, I_BACK};
-static const ItemId MOTOR_ITEMS[] = {I_ROT, I_SPEED, I_DIR, I_ACCEL, I_MICRO, I_STEPS, I_GEAR, I_ONEREV, I_ZERO, I_BACK};
-static const ItemId SCREEN_ITEMS[] = {I_BRIGHT, I_LANG, I_DARK, I_BACK};
-static const ItemId PI_ITEMS[] = {I_REBOOT, I_POWEROFF, I_BACK};
+enum PageId { PG_MAIN, PG_SETTINGS, PG_SPIN, PG_DISPLAY, PG_PROJ, PG_MOTOR, PG_SYSTEM, PG_FILES };
+static const ItemId MAIN_ITEMS[] = {I_PRINT, I_CONNECT, I_SETTINGS};
+// Settings is a short list of groups; every group is its own page (back = tilt left / long press)
+static const ItemId SETTINGS_ITEMS[] = {I_G_SPIN, I_G_DISPLAY, I_G_PROJ, I_G_MOTOR, I_G_SYSTEM};
+static const ItemId SPIN_ITEMS[] = {I_ROT, I_SPEED, I_DIR};
+static const ItemId DISPLAY_ITEMS[] = {I_BRIGHT, I_LANG, I_DARK, I_AXO_SHOW, I_AXO_COLOR};
+static const ItemId PROJ_ITEMS[] = {I_P_BLACK, I_P_WHITE, I_P_GRID, I_P_FOCUS, I_P_CIRCLE, I_P_CENTER, I_P_VIAL};
+static const ItemId MOTOR_ITEMS[] = {I_ACCEL, I_MICRO, I_STEPS, I_GEAR, I_ONEREV, I_ZERO};
+static const ItemId SYSTEM_ITEMS[] = {I_REBOOT, I_POWEROFF, I_ABOUT};
 struct PageDef { const ItemId* items; int n; };
-static const PageDef PAGES[] = {{MAIN_ITEMS, 3}, {SERVICE_ITEMS, 7}, {PROJ_ITEMS, 8}, {MOTOR_ITEMS, 10},
-                                {SCREEN_ITEMS, 4}, {PI_ITEMS, 3}, {AXO_ITEMS, 3}, {nullptr, 0}};
+#define PG_N(a) ((int)(sizeof(a) / sizeof((a)[0])))
+static const PageDef PAGES[] = {{MAIN_ITEMS, PG_N(MAIN_ITEMS)},       {SETTINGS_ITEMS, PG_N(SETTINGS_ITEMS)},
+                                {SPIN_ITEMS, PG_N(SPIN_ITEMS)},       {DISPLAY_ITEMS, PG_N(DISPLAY_ITEMS)},
+                                {PROJ_ITEMS, PG_N(PROJ_ITEMS)},       {MOTOR_ITEMS, PG_N(MOTOR_ITEMS)},
+                                {SYSTEM_ITEMS, PG_N(SYSTEM_ITEMS)},   {nullptr, 0}};
 static const Str MORPH_NAME[MORPH_COUNT] = {S_C_PINK, S_C_GOLD, S_C_WILD, S_C_BLACK, S_C_BLUE, S_C_RGB};
 static const int MICRO_OPTS[] = {1, 2, 4, 8, 16, 32, 64, 128, 256};
 static const int STEPS_OPTS[] = {200, 400};
@@ -104,15 +110,16 @@ static int stackPage[6], stackSel[6], depth = 0;
 static Ease nav;
 static int navDir = 0;
 
+static bool projLit = false;  // a test pattern may be on the projector
 static bool editing = false;
-static ItemId editItem = I_BACK;
+static ItemId editItem = I_ABOUT;
 static Spring edit;
 static Spring bump;
 static int bumpDir = 0;
 static Key lastKey = K_NONE;
 static float lastKeyT = -1;
 static int fast = 0;
-static ItemId confirmItem = I_BACK;
+static ItemId confirmItem = I_REBOOT;
 static Spring confirm;
 
 static Spring spS, squash;
@@ -337,7 +344,6 @@ static void itemValue(ItemId it, char* b, size_t n) {
     case I_BRIGHT: snprintf(b, n, "%d%%", S.bright); break;
     case I_LANG: snprintf(b, n, "%s", T(S_LANGNAME)); break;
     case I_DARK: snprintf(b, n, "%s", S.dark ? T(S_ON) : T(S_OFF)); break;
-    case I_BACK: snprintf(b, n, "←"); break;
     case I_AXO_SHOW: snprintf(b, n, "%s", T(S.home == HOME_AXO ? S_HOME_AXO : S_HOME_CARD)); break;
     case I_AXO_COLOR: snprintf(b, n, "%s", T(MORPH_NAME[S.axoColor % MORPH_COUNT])); break;
     case I_P_BLACK: case I_P_WHITE: case I_P_GRID: case I_P_FOCUS: case I_P_CIRCLE:
@@ -357,8 +363,17 @@ static ItemId itemAt(const PageView& p, int i) { return p.page == PG_FILES ? I_F
 static ItemId curItem() { return itemAt(pv, pv.sel); }
 
 // ================================================================ actions
+// the driver is not reconfigured under a spinning motor: the change waits for the stop
+static bool cfgPending = false;
+static void applyMotorCfg() {
+  if (motorOn) { cfgPending = true; return; }
+  H.motorConfig(S);
+  cfgPending = false;
+}
+
 static void setMotor(bool on) {
   motorOn = on;
+  if (!on && cfgPending) { H.motorConfig(S); cfgPending = false; }
   H.spin(on, S.rpm);
   sendf("EV SPIN %d", on ? 1 : 0);
 }
@@ -374,7 +389,7 @@ static void pushPage(int page) {
 }
 static void popPage() {
   if (depth == 0) return;
-  if (pv.page == PG_PROJ) H.send("EV PATTERN black");  // never leave light on by accident
+  if (projLit) { H.send("EV PATTERN black"); projLit = false; }  // never leave light on by accident
   oldPv = pv;
   depth--;
   pv = PageView();
@@ -430,24 +445,24 @@ static void changeValue(ItemId it, int dir) {
       float v = clampf(S.accel + dir * (fast < 6 ? 1.f : 5.f), 1, 60);
       changed = v != S.accel;
       S.accel = v;
-      if (changed) H.motorConfig(S);
+      if (changed) applyMotorCfg();
       break;
     }
     case I_MICRO: {
       int i = indexOf(MICRO_OPTS, 9, S.micro) + dir;
-      if (i >= 0 && i < 9) { S.micro = MICRO_OPTS[i]; changed = true; H.motorConfig(S); }
+      if (i >= 0 && i < 9) { S.micro = MICRO_OPTS[i]; changed = true; applyMotorCfg(); }
       break;
     }
     case I_STEPS: {
       int i = indexOf(STEPS_OPTS, 2, S.stepsRev) + dir;
-      if (i >= 0 && i < 2) { S.stepsRev = STEPS_OPTS[i]; changed = true; H.motorConfig(S); }
+      if (i >= 0 && i < 2) { S.stepsRev = STEPS_OPTS[i]; changed = true; applyMotorCfg(); }
       break;
     }
     case I_GEAR: {
       float v = roundf(clampf(S.gear + dir * (fast < 6 ? 0.01f : 0.1f), 0.1f, 50.f) * 100.f) / 100.f;
       changed = v != S.gear;
       S.gear = v;
-      if (changed) H.motorConfig(S);
+      if (changed) applyMotorCfg();
       break;
     }
     case I_BRIGHT: {
@@ -487,8 +502,8 @@ static void startEdit(ItemId it) {
   editing = true;
   editItem = it;
   edit.target = 1;
-  if (it == I_P_CENTER) H.send("EV PATTERN center");
-  if (it == I_P_VIAL) H.send("EV PATTERN vial");
+  if (it == I_P_CENTER) { H.send("EV PATTERN center"); projLit = true; }
+  if (it == I_P_VIAL) { H.send("EV PATTERN vial"); projLit = true; }
 }
 static void endEdit() {
   editing = false;
@@ -523,13 +538,13 @@ static void activate() {
       break;
     case I_FILE: if (nFiles > 0) openSetup(pv.sel); break;
     case I_CONNECT: go(SC_CONNECT); break;
-    case I_SERVICE: pushPage(PG_SERVICE); break;
-    case I_PROJ: pushPage(PG_PROJ); break;
-    case I_MOTOR: pushPage(PG_MOTOR); break;
-    case I_SCREEN: pushPage(PG_SCREEN); break;
-    case I_PIMENU: pushPage(PG_PI); break;
-    case I_AXO: pushPage(PG_AXO); break;
-    case I_AXO_SHOW: S.home = (S.home + 1) % HOME_COUNT; H.save(S); break;
+    case I_SETTINGS: pushPage(PG_SETTINGS); break;
+    case I_G_SPIN: pushPage(PG_SPIN); break;
+    case I_G_DISPLAY: pushPage(PG_DISPLAY); break;
+    case I_G_PROJ: pushPage(PG_PROJ); break;
+    case I_G_MOTOR: pushPage(PG_MOTOR); break;
+    case I_G_SYSTEM: pushPage(PG_SYSTEM); break;
+    case I_AXO_SHOW: S.home = (S.home + 1) % HOME_COUNT; H.save(S); say(T(S_SAVED), 1.2f); break;
     case I_AXO_COLOR:
       S.axoColor = (S.axoColor + 1) % MORPH_COUNT;
       S.home = HOME_AXO;  // picking a colour brings him back
@@ -537,19 +552,18 @@ static void activate() {
       mood(MOOD_HAPPY, 0.8f);
       break;
     case I_ABOUT: go(SC_ABOUT); break;
-    case I_P_BLACK: H.send("EV PATTERN black"); break;
-    case I_P_WHITE: H.send("EV PATTERN white"); break;
-    case I_P_GRID: H.send("EV PATTERN grid"); break;
-    case I_P_FOCUS: H.send("EV PATTERN focus"); break;
-    case I_P_CIRCLE: H.send("EV PATTERN circle"); break;
+    case I_P_BLACK: H.send("EV PATTERN black"); projLit = true; break;
+    case I_P_WHITE: H.send("EV PATTERN white"); projLit = true; break;
+    case I_P_GRID: H.send("EV PATTERN grid"); projLit = true; break;
+    case I_P_FOCUS: H.send("EV PATTERN focus"); projLit = true; break;
+    case I_P_CIRCLE: H.send("EV PATTERN circle"); projLit = true; break;
     case I_ROT: setMotor(!motorOn); say(motorOn ? T(S_SPINNING) : T(S_STOPPED)); break;
-    case I_DIR: S.dirInv = !S.dirInv; H.motorConfig(S); H.save(S); break;
-    case I_ONEREV: motorOn = false; H.motorZero(); H.motorMove(360, S.rpm); break;
+    case I_DIR: S.dirInv = !S.dirInv; applyMotorCfg(); H.save(S); say(T(S_SAVED), 1.2f); break;
+    case I_ONEREV: if (motorOn) setMotor(false); H.motorZero(); H.motorMove(360, S.rpm); break;
     case I_ZERO: H.motorZero(); say(T(S_ZEROED)); break;
-    case I_LANG: S.lang = 1 - S.lang; H.save(S); break;
-    case I_DARK: S.dark = !S.dark; H.save(S); break;
+    case I_LANG: S.lang = 1 - S.lang; H.save(S); say(T(S_SAVED), 1.2f); break;
+    case I_DARK: S.dark = !S.dark; H.save(S); say(T(S_SAVED), 1.2f); break;
     case I_REBOOT: case I_POWEROFF: confirmItem = it; confirm.target = 1; break;
-    case I_BACK: popPage(); break;
     default:
       if (editable(it)) startEdit(it);
       break;
@@ -683,7 +697,10 @@ void ui_line(const char* line, uint32_t nowMs) {
     H.send("PONG SpinScreen " FW_VERSION);
   } else if (!strncmp(line, "FL ", 3)) {  // video list
     const char* a = line + 3;
+    static bool skipList = false;  // a list pushed while the user sets up a print must not move files[suFile]
     if (!strncmp(a, "BEGIN", 5)) {
+      skipList = screen == SC_SETUP;
+      if (skipList) return;
       float fac = 0, d = 3;
       int dt = 5;
       sscanf(a + 5, "%d %f %f %d", &nIncoming, &fac, &d, &dt);
@@ -691,6 +708,8 @@ void ui_line(const char* line, uint32_t nowMs) {
       defDelay = d;
       defTurns = dt;
       nFiles = 0;
+    } else if (skipList) {
+      if (!strncmp(a, "END", 3)) skipList = false;
     } else if (!strncmp(a, "END", 3)) {
       listing = false;
       knownVideos = nFiles;
@@ -719,6 +738,7 @@ void ui_line(const char* line, uint32_t nowMs) {
   } else if (!strncmp(line, "SPIN ", 5)) {
     motorOn = atoi(line + 5) != 0;
     H.spin(motorOn, S.rpm);
+    if (!motorOn && cfgPending) { H.motorConfig(S); cfgPending = false; }
   } else if (!strncmp(line, "PROG ", 5)) {
     float p = 0;
     int s = -1;
@@ -1107,7 +1127,7 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
         }
         continue;
       }
-      uint16_t base = it == I_PRINT ? PINK : (it == I_BACK ? DIM : hex(0xD2B6C3));
+      uint16_t base = it == I_PRINT ? PINK : hex(0xD2B6C3);
       if (it == I_POWEROFF || it == I_REBOOT) base = hex(0xFF9DB8);
       c.text(*FR, (int)(LIST_X + ROW_PAD + dx + k * 2), ty, T(ITEM_NAME[it]), lerpColor(base, DARK, k), listA);
       char v[32];
@@ -1542,7 +1562,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   if (pv.sel >= pageCount(pv)) pv.sel = pageCount(pv) - 1;
 
   // list geometry (animated between "beside Spinny" and "without him")
-  bool dial = (screen == SC_MENU && pv.page == PG_MOTOR) || screen == SC_PRINT || (screen == SC_CONNECT && qrOk);
+  bool dial = (screen == SC_MENU && (pv.page == PG_SPIN || pv.page == PG_MOTOR)) || screen == SC_PRINT || (screen == SC_CONNECT && qrOk);
   leftDial.target = dial ? 1 : 0;
   leftDial.step(dt, 8);
   bool axoOn = S.home == HOME_AXO;
@@ -1564,12 +1584,19 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
 
   float top = pv.sel * ROW_H;
   float vtop = (pv.page == PG_MAIN && S.home == HOME_CARD) ? fmx(top - ROW_H, 0) : top;  // rows under the card
-  if (vtop - pv.scroll.target > (VISIBLE - 1) * ROW_H) pv.scroll.target = vtop - (VISIBLE - 1) * ROW_H;
-  if (vtop < pv.scroll.target) pv.scroll.target = vtop;
+  {  // the list starts to move one row before the selection reaches the edge: no sudden jumps
+    int n = pageCount(pv);
+    float maxS = n > VISIBLE ? (n - VISIBLE) * ROW_H : 0;
+    float pad = (VISIBLE >= 3 && n > VISIBLE) ? ROW_H : 0;
+    float lo = vtop - (VISIBLE - 1) * ROW_H + pad, hi = vtop - pad;
+    if (pv.scroll.target < lo) pv.scroll.target = lo;
+    if (pv.scroll.target > hi) pv.scroll.target = hi;
+    pv.scroll.target = clampf(pv.scroll.target, 0, maxS);
+  }
   pv.pill.target = top;
-  pv.pill.step(dt, 420, 30);
-  pv.scroll.step(dt, 14);
-  nav.step(dt, 9);
+  pv.pill.step(dt, 300, 27);  // softer spring: a little overshoot, no snapping
+  pv.scroll.step(dt, 10);
+  nav.step(dt, 8);
   edit.step(dt, 260, 24);
   bump.step(dt, 500, 34);
   toast.step(dt, 300, 22);

@@ -28,7 +28,7 @@ def shots(exe, extra, tmp):
     subprocess.run([exe, *extra, str(a)], check=True)
     subprocess.run([exe, *extra, "axo", str(b)], check=True)
     files = sorted(a.glob("*.ppm"))
-    files[2:2] = sorted(b.glob("*.ppm"))[1:]  # Spinny's main page and service list after the card's
+    files[2:2] = sorted(b.glob("*.ppm"))[1:]  # Spinny's main page and settings list after the card's
     return files
 
 

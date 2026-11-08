@@ -20,7 +20,7 @@ static MotorConfig toMotor(const Settings& s) {
   return MotorConfig{s.stepsRev, s.micro, s.gear, s.accel, s.dirInv != 0};
 }
 // The Pi is on the USB cable.
-static char rxBuf[128];  // = Line::s: a longer line is dropped, never cut
+static char rxBuf[160];  // = Line::s: a longer line is dropped, never cut
 static int rxN = 0;
 static bool rxJunk = false;  // this line had bytes no Pi sends: dropped
 
@@ -61,7 +61,8 @@ static void hMove(double deg, float rpm) { motor_move(deg, rpm); }
 // ---- the Pi link runs in its own task so angle queries are answered within ~1 ms,
 //      even while a frame is being drawn. Everything else is handed to the UI loop.
 static QueueHandle_t lines;
-struct Line { char s[128]; };
+static volatile uint32_t linesDropped = 0;  // lines lost because the UI did not drain in time
+struct Line { char s[160]; };
 static void hSend(const char* line) {
   Line l;
   strncpy(l.s, line, sizeof l.s);
@@ -101,7 +102,10 @@ static void handleLine(const char* buf) {
   // A file list (FL BEGIN, up to 32 files, FL END) comes in one burst, faster than the UI takes
   // lines while it draws a frame. Wait for room rather than drop a line: the UI empties the
   // queue at least once a frame, and POS (the time-critical one) was answered above already.
-  if (xQueueSend(lines, &l, pdMS_TO_TICKS(40)) != pdTRUE) sendLine("ERR screen busy: line dropped");
+  if (xQueueSend(lines, &l, pdMS_TO_TICKS(40)) != pdTRUE) {
+    linesDropped++;
+    sendLine("ERR screen busy: line dropped");
+  }
 }
 
 static void serialTask(void*) {
@@ -143,10 +147,21 @@ void setup() {
   s.home = prefs.getUChar("home", HOME_CARD);  // a new key: every board starts with the card, Spinny is opt-in
   if (s.home >= HOME_COUNT) s.home = HOME_CARD;
   s.axoColor = prefs.getUChar("axoColor", 0);
+  // flash can hold anything after a bad write or an older firmware: bring every value into range
+  if (!(s.rpm >= RPM_MIN && s.rpm <= RPM_MAX)) s.rpm = RPM_DEFAULT;
+  if (s.lang > 1) s.lang = 0;
+  if (s.bright < 10 || s.bright > 100) s.bright = 80;
+  if (s.micro < 1 || s.micro > 256 || (s.micro & (s.micro - 1))) s.micro = MOTOR_MICROSTEPS;
+  if (s.stepsRev != 200 && s.stepsRev != 400) s.stepsRev = MOTOR_STEPS_PER_REV;
+  if (!(s.accel >= 1 && s.accel <= 60)) s.accel = MOTOR_ACCEL_RPM_S;
+  if (!(s.gear >= 0.1f && s.gear <= 50.f)) s.gear = MOTOR_GEAR;
+  s.dirInv = s.dirInv ? 1 : 0;
+  s.dark = s.dark ? 1 : 0;
+  if (s.axoColor > 5) s.axoColor = 0;
 
   motor_init(toMotor(s), PIN_STEP, PIN_DIR, PIN_EN);
   input_init();
-  lines = xQueueCreate(24, sizeof(Line));
+  lines = xQueueCreate(48, sizeof(Line));
   txq = xQueueCreate(24, sizeof(Line));
   haveScreen = display_init();
   if (haveScreen) {

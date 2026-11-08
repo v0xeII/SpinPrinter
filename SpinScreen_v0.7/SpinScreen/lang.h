@@ -40,12 +40,14 @@ enum Str {
   S_CARD_PICK, S_HOME_CARD, S_HOME_AXO,
   S_STOP_AGAIN, S_ASK_TITLE, S_ASK_FROM, S_ASK_STARTING, S_ASK_NO,
   S_DONE_HINT,
+  // settings groups
+  S_G_SPIN, S_G_DISPLAY, S_G_PROJ, S_G_MOTOR, S_G_SYSTEM,
   S_COUNT
 };
 
 static const char* const STR[2][S_COUNT] = {
     {
-        "Печать", "Подключение", "Сервис",
+        "Печать", "Подключение", "Настройки",
         "Проектор", "Мотор", "Экран", "Raspberry Pi", "О принтере", "Назад",
         "Чёрный", "Белый", "Сетка", "Фокус", "Круг", "Центровка", "Ширина флакона",
         "Вращение", "Скорость", "Направление", "Разгон", "Микрошаг", "Шагов/оборот", "Передача", "Ровно 1 оборот",
@@ -70,9 +72,10 @@ static const char* const STR[2][S_COUNT] = {
         "выбрать видео", "Карточка", "Аксолотль",
         "← ещё раз — стоп", "Печатать?", "из SpinSlicer", "Запускаю…", "Печать отменена",
         "↑↓ выбор · → ответ · ← пропуск",
+        "Вращение", "Экран", "Проектор", "Мотор", "Система",
     },
     {
-        "Print", "Connect", "Service",
+        "Print", "Connect", "Settings",
         "Projector", "Motor", "Display", "Raspberry Pi", "About", "Back",
         "Black", "White", "Grid", "Focus", "Circle", "Centering", "Vial width",
         "Rotation", "Speed", "Direction", "Ramp", "Microsteps", "Steps/rev", "Gear ratio", "Exactly 1 turn",
@@ -97,5 +100,6 @@ static const char* const STR[2][S_COUNT] = {
         "choose a video", "Card", "Axolotl",
         "← again = stop", "Print?", "from SpinSlicer", "Starting…", "Print cancelled",
         "↑↓ choose · → answer · ← skip",
+        "Spin", "Display", "Projector", "Motor", "System",
     },
 };
