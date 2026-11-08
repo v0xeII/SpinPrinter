@@ -108,7 +108,7 @@ to the bottom and sleeps after a minute without keys, dashes about on "Done!" an
 
 | Pi → ESP | does |
 |---|---|
-| `PING` | answers `PONG SpinScreen 0.7.1`; the Pi sends it every second |
+| `PING` | answers `PONG SpinScreen 0.8.0`; the Pi sends it every second |
 | `RPM 9.5` · `SPIN 1/0` | speed in rpm · motor on/off (with a ramp) |
 | `STATE PRINT/DONE/IDLE/ERROR text` · `PROG 42 80` | print state · progress 42 %, 80 s left |
 | `MSG text` | Spinny says it in a bubble |
@@ -124,7 +124,7 @@ to the bottom and sleeps after a minute without keys, dashes about on "Done!" an
 | `CAL offset vial` | centering and vial width (Projector menu) |
 | `JOY` | what the joystick reads (wiring check) |
 
-At power-up the board prints `READY SpinScreen 0.7.1 st7789_240x320 320x240 joystick` (and `noscreen` if the screen did not start).
+At power-up the board prints `READY SpinScreen 0.8.0 st7789_240x320 320x240 joystick` (and `noscreen` if the screen did not start).
 
 | ESP → Pi | when |
 |---|---|
