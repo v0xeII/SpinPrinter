@@ -1057,6 +1057,7 @@ class Printer:
         self.state = "idle"  # idle | wait | print | done | error
         self.wait = None  # (seconds, kind) while waiting before the light
         self.job = None
+        self.request = None  # the last print sent from SpinSlicer that waits for a yes on the screen
         self.msg = ""
         self.sync_ms = None
         self.drops = 0
@@ -1181,7 +1182,7 @@ class Printer:
              "hdmi": self.warm.connected, "warmup_left_s": left, "wait": self.wait,
              "sync_ms": self.sync_ms, "drops": self.drops, "motor_rpm": self.motor_rpm,
              "motor_angle": self.motor_angle % 360, "settings": self.settings, "pattern": self.pattern,
-             "history": self.history[-8:], "version": VERSION,
+             "history": self.history[-8:], "version": VERSION, "request": self.request_view(),
              "engine": "angle" if self.angle_mode else "mpv"}
         if j:
             d["job"] = {k: j.get(k) for k in ("id", "file", "rpm", "revs", "time_s", "factor", "plan_revs", "reversed")}
@@ -1190,19 +1191,72 @@ class Printer:
         return d
 
     # ---- control
-    def start(self, fid, revs=None, factor=None, delay_s=None):
+    def _check(self, fid, revs=None, factor=None):
+        """(error, file, path, plan): what start() needs, and why it cannot start (None = it can)."""
         if self.busy():
-            return "busy"
+            return "busy", None, None, None
         f, path = self.lib.resolve(fid)
         if f and f.get("error"):
-            return f["error"]
+            return f["error"], None, None, None
         if not f or not f.get("rpm") or not path:
-            return "no such video"
+            return "no such video", None, None, None
         if self.warm.connected is False:
-            return "projector not connected (HDMI)"
+            return "projector not connected (HDMI)", None, None, None
         p = self.plan_for(f, revs, factor)
         if p["reversed"] and not self.angle_mode:
-            return "видео для другого направления вращения: нужен движок angle (SpinProj)"
+            return "видео для другого направления вращения: нужен движок angle (SpinProj)", None, None, None
+        return None, f, path, p
+
+    # A print sent from SpinSlicer does not start by itself: the vial has to be in place, so the
+    # printer's screen asks (ASK) and a yes there (EV GO) starts it. Unanswered, it goes after 10 min.
+    ASK_TIMEOUT_S = 600.0
+    NO_SCREEN = "экран принтера не подключён"
+
+    def ask(self, fid, revs=None, factor=None, delay_s=None):
+        err, f, _path, p = self._check(fid, revs, factor)
+        if err:
+            return err
+        if not self.esp.connected:
+            return self.NO_SCREEN
+        self.expire_request(replaced=True)
+        self.request = {"state": "waiting_confirm", "id": fid, "name": f["name"], "revs": p["revs"],
+                        "time_s": p["time_s"], "error": None, "t": time.monotonic(),
+                        "args": (fid, revs, factor, delay_s)}
+        name = f["name"].encode("utf-8")[:60].decode("utf-8", "ignore")
+        self.esp.send(f"ASK {int(p['revs'])} {int(round(p['time_s']))} {name}")
+        log("print request:", f["name"], "waits for a yes on the screen")
+        return None
+
+    def answer(self, yes):
+        r = self.request
+        if not r or r["state"] != "waiting_confirm":
+            return
+        if not yes:
+            r["state"] = "cancelled"
+            log("print request: cancelled on the screen")
+            return
+        r["state"] = "starting"
+        err = self.start(*r["args"])
+        r["state"], r["error"] = ("started", None) if err is None else ("error", err)
+        if err:
+            self.esp.send(f"STATE ERROR {err}")
+
+    def expire_request(self, replaced=False):
+        """Drop a request nobody answered (or one a newer print replaces): the screen leaves it."""
+        r = self.request
+        if r and r["state"] == "waiting_confirm" and (replaced or time.monotonic() - r["t"] >= self.ASK_TIMEOUT_S):
+            r["state"] = "replaced" if replaced else "expired"
+            self.esp.send("ASK END")
+
+    def request_view(self):
+        r = self.request
+        return {k: v for k, v in r.items() if k not in ("t", "args")} if r else None
+
+    def start(self, fid, revs=None, factor=None, delay_s=None):
+        err, f, path, p = self._check(fid, revs, factor)
+        if err:
+            return err
+        self.expire_request(replaced=True)  # started some other way: the question on the screen goes
         delay_s = float(self.settings["delay_s"] if delay_s is None else delay_s)
         self.settings.update(factor=p["factor"], delay_s=delay_s, last_id=fid)
         if not f.get("plan_revs"):
@@ -1317,6 +1371,8 @@ class Printer:
                 err = self.start(self.settings.get("last_id") or "")
             if err:
                 self.esp.send(f"STATE ERROR {err}")
+        elif p[0] in ("GO", "NO"):
+            self.answer(p[0] == "GO")
         elif p[0] == "STOP":
             self.stop("с экрана принтера")
         elif p[0] == "RESULT" and len(p) > 1:
@@ -1655,6 +1711,7 @@ class Printer:
     def poll_idle(self):
         """Keep motor rpm/angle fresh for the web page when no print is running."""
         while True:
+            self.expire_request()
             if not self.busy():
                 p = self.esp.query_pos()
                 if p:
@@ -1930,9 +1987,11 @@ class Handler(BaseHTTPRequestHandler):
         p = a.printer
         u = urllib.parse.urlparse(self.path)
         b = self._body()
-        if u.path == "/api/print":
-            err = p.start(b.get("id", ""), b.get("revs"), b.get("factor"), b.get("delay_s"))
-            return self._json({"ok": err is None, "error": err})
+        if u.path == "/api/print":  # "confirm": true = SpinSlicer: wait for a yes on the printer's screen
+            args = (b.get("id", ""), b.get("revs"), b.get("factor"), b.get("delay_s"))
+            err = p.ask(*args) if b.get("confirm") else p.start(*args)
+            return self._json({"ok": err is None, "error": err, "request": p.request_view()},
+                              409 if err == p.NO_SCREEN else 200)
         if u.path == "/api/plan":  # what a print would be with these settings (for the web form)
             f, _ = a.lib.resolve(b.get("id", ""))
             if not f or not f.get("rpm"):
