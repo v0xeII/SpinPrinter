@@ -998,9 +998,52 @@ class OverTheAir(Tmp):
             self.assertEqual(self.esp.sent[-1], "UPD IDLE")
 
     def test_a_failed_firmware_stops_there(self):
+        # only the board needed it: the error stays on the screen
+        self.pr.check_updates(latest=lambda: "v" + spinpi.VERSION, fetch=self.fetch())
+        if self.pr.update and self.pr.update["fw"] and not self.pr.update["pi"]:
+            self.pr.run_update(flash=lambda f, port: (False, "timeout"), run=lambda *a, **k: self.fail("must stop"))
+            self.assertEqual(self.esp.sent[-1], "UPD ERR Прошивка платы не записана")
+
+    def test_a_failed_firmware_does_not_hold_the_raspberry(self):
+        # seen on a real printer: SpinPi 0.8.5 with Debian's esptool could not write the board, and so
+        # never updated itself either (the newer SpinPi that could write it never came)
         self.pr.check_updates(latest=lambda: "v0.9.0", fetch=self.fetch())
-        self.pr.run_update(flash=lambda f, port: (False, "timeout"), run=lambda *a, **k: self.fail("must stop"))
-        self.assertEqual(self.esp.sent[-1], "UPD ERR Прошивка платы не записана")
+        ran = []
+        self.pr.run_update(flash=lambda f, port: (False, "stub_flasher"), run=lambda cmd, **kw: ran.append(cmd),
+                           watch=False)
+        self.assertEqual(len(ran), 1)
+        self.assertEqual(self.esp.sent[-1], "UPD RUN pi")
+
+    def test_esptool_without_stubs(self):
+        fake_firmware(self.path("fw.bin"), "0.9.0")
+        fw = spinpi.firmware_info(self.path("fw.bin"), "usb")
+        calls = []
+
+        class R:
+            def __init__(self, code, out):
+                self.returncode, self.stdout, self.stderr = code, out, ""
+
+        def debian(args, **kw):  # apt's esptool: no stub files
+            calls.append(args)
+            if "--no-stub" in args:
+                return R(0, "Hash of data verified.")
+            return R(2, "FileNotFoundError: [Errno 2] No such file or directory: "
+                        "'/usr/lib/python3/dist-packages/esptool/targets/stub_flasher/stub_flasher_32s3.json'")
+        cmd = spinpi.esptool_cmd
+        spinpi.esptool_cmd = lambda: ["esptool"]
+        try:
+            self.assertEqual(spinpi.flash_firmware(fw, "/dev/ttyACM0", run=debian), (True, "ok"))
+            self.assertEqual(len(calls), 2)
+            self.assertNotIn("--no-stub", calls[0])
+            self.assertLess(calls[1].index("--no-stub"), calls[1].index("write_flash"))
+            calls.clear()
+            busy = lambda args, **kw: calls.append(args) or R(2, "Could not open /dev/ttyACM0, the port is busy")
+            ok, msg = spinpi.flash_firmware(fw, "/dev/ttyACM0", run=busy)
+            self.assertFalse(ok)
+            self.assertEqual(len(calls), 1)  # another failure: no second try
+            self.assertIn("busy", msg)
+        finally:
+            spinpi.esptool_cmd = cmd
 
 
 class PartShape(Tmp):

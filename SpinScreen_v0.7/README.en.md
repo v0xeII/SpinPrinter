@@ -139,7 +139,7 @@ to the bottom and sleeps after a minute without keys, dashes about on "Done!" an
 
 | Raspberry → ESP | does |
 |---|---|
-| `PING` | answers `PONG SpinScreen 0.8.6`; the Raspberry sends it every second |
+| `PING` | answers `PONG SpinScreen 0.8.7`; the Raspberry sends it every second |
 | `RPM 9.5` · `SPIN 1/0` | speed in rpm · motor on/off (with a ramp) |
 | `STATE PRINT/DONE/IDLE/ERROR text` · `PROG 42 80` | print state · progress 42 %, 80 s left |
 | `MSG text` | Spinny says it in a bubble |
@@ -162,7 +162,7 @@ to the bottom and sleeps after a minute without keys, dashes about on "Done!" an
 | `UPD CHECKING` · `UPD STEP text` · `UPD NONE` · `UPD AVAIL 0.9.0` · `UPD ERR text` | the answer to "Check for updates": a spinner turns in the row meanwhile, `STEP` says what is going on |
 | `UPD RUN pi` · `UPD IDLE` | the Raspberry updates itself ("Updating the Raspberry…") · a new SpinPi started |
 
-At power-up the board prints `READY SpinScreen 0.8.6 st7789_240x320 320x240 joystick` (and `noscreen` if the screen did not start).
+At power-up the board prints `READY SpinScreen 0.8.7 st7789_240x320 320x240 joystick` (and `noscreen` if the screen did not start).
 
 | ESP → Raspberry | when |
 |---|---|

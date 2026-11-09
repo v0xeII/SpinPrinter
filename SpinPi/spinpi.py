@@ -39,7 +39,7 @@ except ImportError:  # still serve the web page without the ESP
     serial = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "0.8.6"
+VERSION = "0.8.7"
 VIDEO_EXT = (".mp4", ".mkv", ".mov", ".avi", ".webm")
 SPIN_EXT = ".spin"  # SpinSlicer's one-file print: a stored ZIP with spin.json, video.mp4, preview.png
 PRINT_EXT = VIDEO_EXT + (SPIN_EXT,)
@@ -1650,9 +1650,13 @@ class Printer:
             return
         self.upd_state = {"state": "updating", "msg": u["version"]}
         if u["fw"] and not self.firmware_update(flash=flash, f=u["fw"]):
-            self.upd_state = {"state": "error", "msg": self.fw_state.get("msg", "")}
-            self.esp.send("UPD ERR Прошивка платы не записана")
-            return
+            if not u["pi"]:
+                self.upd_state = {"state": "error", "msg": self.fw_state.get("msg", "")}
+                self.esp.send("UPD ERR Прошивка платы не записана")
+                return
+            # the Raspberry still goes on: a newer SpinPi may write the board where this one could not
+            # ("Check for updates" again after it restarts)
+            log("board firmware failed, updating the Raspberry anyway")
         if not u["pi"]:
             self.update = None
             self.upd_state = {"state": "none", "msg": u["version"]}
@@ -2257,8 +2261,12 @@ def esptool_cmd():
     return None
 
 
-def flash_firmware(fw, port, timeout=240):
-    """Write the app part of fw (firmware_info) at 0x10000 of the ESP32-S3 on port. Returns (ok, message)."""
+def flash_firmware(fw, port, timeout=240, run=None):
+    """Write the app part of fw (firmware_info) at 0x10000 of the ESP32-S3 on port. Returns (ok, message).
+    Debian's esptool (apt install esptool) comes without its flasher stubs ("No such file ...
+    stub_flasher/stub_flasher_32s3.json"): then it is done again with --no-stub, through the chip's
+    own ROM loader (slower, the same result)."""
+    run = run or subprocess.run
     cmd = esptool_cmd()
     if not cmd:
         return False, "нет esptool: sudo apt install esptool"
@@ -2271,23 +2279,27 @@ def flash_firmware(fw, port, timeout=240):
     tmp = os.path.join(tempfile.gettempdir(), f"spinscreen-app-{os.getpid()}.bin")
     with open(tmp, "wb") as fh:
         fh.write(app)
-    args = cmd + ["--chip", "esp32s3", "--port", port, "--baud", "460800", "--before", "default_reset",
-                  "--after", "hard_reset", "write_flash", hex(APP_OFFSET), tmp]
-    log("firmware:", " ".join(args))
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return False, f"esptool: {e}"
+        for extra in ([], ["--no-stub"]):
+            args = cmd + ["--chip", "esp32s3", "--port", port, "--baud", "460800", "--before", "default_reset",
+                          "--after", "hard_reset"] + extra + ["write_flash", hex(APP_OFFSET), tmp]
+            log("firmware:", " ".join(args))
+            try:
+                r = run(args, capture_output=True, text=True, timeout=timeout)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                return False, f"esptool: {e}"
+            out = (r.stdout + r.stderr).strip()
+            log("esptool:", out[-600:])
+            if r.returncode == 0:
+                return True, "ok"
+            if "stub_flasher" not in out:  # failed for another reason: --no-stub would not help
+                break
+        return False, (out.splitlines() or ["esptool failed"])[-1][:120]
     finally:
         try:
             os.remove(tmp)
         except OSError:
             pass
-    out = (r.stdout + r.stderr).strip()
-    log("esptool:", out[-600:])
-    if r.returncode != 0:
-        return False, (out.splitlines() or ["esptool failed"])[-1][:120]
-    return True, "ok"
 
 
 # ---- updates over the air: what GitHub has

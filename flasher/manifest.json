@@ -1,6 +1,6 @@
 {
   "name": "SpinScreen",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "new_install_prompt_erase": false,
   "builds": [{
     "chipFamily": "ESP32-S3",
