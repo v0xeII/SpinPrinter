@@ -181,7 +181,7 @@ Spinny — гибкая цепочка из 15 суставов: голова п
 
 | Raspberry → ESP | что делает |
 |---|---|
-| `PING` | ответ `PONG SpinScreen 0.8.4`; Raspberry шлёт раз в секунду, иначе экран пишет «нет Raspberry» |
+| `PING` | ответ `PONG SpinScreen 0.8.5`; Raspberry шлёт раз в секунду, иначе экран пишет «нет Raspberry» |
 | `RPM 9.5` | скорость вращения, об/мин |
 | `SPIN 1` / `SPIN 0` | мотор вкл/выкл (с плавным разгоном) |
 | `STATE PRINT` / `STATE DONE` / `STATE IDLE` / `STATE ERROR текст` | состояние печати |
@@ -208,7 +208,7 @@ Spinny — гибкая цепочка из 15 суставов: голова п
 | `UPD CHECKING` · `UPD STEP текст` · `UPD NONE` · `UPD AVAIL 0.9.0` · `UPD ERR текст` | ответ на «Проверить обновления»: пока идёт проверка, в строке крутится значок, а `STEP` пишет, что делается |
 | `UPD RUN pi` · `UPD IDLE` | Raspberry обновляет себя (экран «Обновляю Raspberry…») · новый SpinPi запустился |
 
-При включении плата пишет `READY SpinScreen 0.8.4 st7789_240x320 320x240 joystick` (и `noscreen`, если экран не запустился).
+При включении плата пишет `READY SpinScreen 0.8.5 st7789_240x320 320x240 joystick` (и `noscreen`, если экран не запустился).
 
 | ESP → Raspberry | когда |
 |---|---|
