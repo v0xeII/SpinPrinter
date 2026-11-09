@@ -224,6 +224,7 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
           <div class="field"><label data-i="vialw">Ширина флакона, пикс</label><input type="number" id="vialN" min="20" max="1900" step="2" value="400"></div>
           <input type="range" id="vialR" min="40" max="1200" step="2" value="400">
         </div>
+        <div class="field" style="margin-top:12px"><label data-i="factor">Поправка экспозиции, %</label><input type="number" id="expN" min="-70" max="200" step="1" value="0"></div>
         <div class="field" style="margin-top:12px"><label data-i="warmup">Прогрев проектора, мин</label><input type="number" id="warmN" min="0" max="60" step="1" value="5"></div>
         <p class="note" data-i="projNote">Центровка двигает всё изображение (и при печати), пока линия не совпадёт с осью вращения флакона. Не оставляй смолу под светом!</p>
       </section>
@@ -379,6 +380,7 @@ function render(){
   syncCal();
   renderHist();
   if(document.activeElement!==$("warmN")) $("warmN").value=S.settings.warmup_min;
+  if(document.activeElement!==$("expN")) $("expN").value=Math.round(100*(S.settings.factor-1));
   $("foot").textContent=`SpinPi ${S.version}`+(S.esp_version?` · SpinScreen ${S.esp_version}`:"");
 }
 const esc = s => String(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -498,6 +500,12 @@ $("pSave").onclick=async()=>{
   if(r.ok){ PROF=r.printer; document.activeElement.blur(); renderProfile(); loadFiles(); toast(t("saved")); } else toast(r.error);
 };
 $("warmN").onchange=()=>api("/api/settings",{warmup_min:+$("warmN").value});
+$("expN").onchange=async()=>{
+  const pct=Math.max(-70,Math.min(200,+$("expN").value||0));
+  $("expN").value=pct;
+  const r=await api("/api/settings",{factor:1+pct/100});
+  if(S&&r.settings) S.settings.factor=r.settings.factor;
+};
 
 // motor + projector
 $("mOn").onclick=async()=>{ const r=await api("/api/motor",{on:true,rpm:+$("rpmSet").value}); if(!r.ok) toast(t("busy")); };

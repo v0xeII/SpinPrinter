@@ -1948,6 +1948,8 @@ class Handler(BaseHTTPRequestHandler):
             for k in ("warmup_min", "delay_s"):
                 if k in b:
                     p.settings[k] = max(0.0, min(60.0, float(b[k])))
+            if "factor" in b:  # exposure correction, same range as the feedback after a print
+                p.settings["factor"] = round(max(0.3, min(3.0, float(b["factor"]))), 4)
             p.save_settings()
             return self._json({"ok": True, "settings": p.settings})
         if u.path == "/api/printer":
