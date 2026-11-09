@@ -4,6 +4,7 @@
 #include <esp_timer.h>
 
 #include "board.h"
+#include "buzzer.h"
 #include "config.h"
 #include "display.h"
 #include "gfx.h"
@@ -28,6 +29,19 @@ static Board loadBoard() {
 #endif
   if (!have || memcmp(&saved, &mine, sizeof mine) != 0) prefs.putBytes("board", &mine, sizeof mine);
   return mine;
+}
+
+// GPIOs a buzzer may go on: 1..18 and 21 (on the Super Mini: 1..13), not in the wiring.
+// Never 0, 3, 45, 46 (they decide how the chip starts), 19 / 20 (USB), 26..37 (flash, PSRAM).
+static uint32_t buzzerPins(const Board& b) {
+  uint32_t m = 0;
+  for (int p = 1; p <= 21; p++)
+    if (p != 3 && p != 19 && p != 20) m |= 1u << p;
+  const uint8_t used[] = {b.tftScl, b.tftSda, b.tftRes, b.tftDc, b.tftCs, b.tftBlk, b.joyX, b.joyY, b.joySw,
+                          b.step, b.dir, b.en};
+  for (uint8_t p : used)
+    if (p < 32) m &= ~(1u << p);
+  return m;
 }
 
 static MotorConfig toMotor(const Settings& s) {
@@ -102,6 +116,10 @@ static void hSave(const Settings& s) {
   prefs.putUChar("axoColor", s.axoColor);
   prefs.putUChar("sleep", s.sleepMin);
   prefs.putUChar("wizard", s.wizard);
+  prefs.putUChar("theme", s.theme);
+  prefs.putUChar("sound", s.sound);
+  prefs.putUChar("clicks", s.clicks);
+  prefs.putUChar("buzz", s.buzzPin < 0 ? 255 : s.buzzPin);
 }
 static float hRpm() { return motor_rpm(); }
 static double hAngle() { return motor_angle(); }
@@ -201,6 +219,10 @@ void setup() {
   s.sleepMin = prefs.getUChar("sleep", 5);
   // a board that already has settings has been set up: the wizard is for new printers only
   s.wizard = prefs.getUChar("wizard", prefs.isKey("rpm") ? 1 : 0);
+  s.theme = prefs.getUChar("theme", 0);
+  s.sound = prefs.getUChar("sound", SOUND_QUIET);
+  s.clicks = prefs.getUChar("clicks", 0);
+  int buzz = prefs.getUChar("buzz", PIN_BUZZER < 0 ? 255 : PIN_BUZZER);
   // flash can hold anything after a bad write or an older firmware: bring every value into range
   if (!(s.rpm >= RPM_MIN && s.rpm <= RPM_MAX)) s.rpm = RPM_DEFAULT;
   if (s.lang > 1) s.lang = 0;
@@ -214,16 +236,25 @@ void setup() {
   if (s.axoColor > 5) s.axoColor = 0;
   if (s.sleepMin != 0 && s.sleepMin != 1 && s.sleepMin != 5 && s.sleepMin != 15 && s.sleepMin != 30) s.sleepMin = 5;
   s.wizard = s.wizard ? 1 : 0;
+  s.theme = s.theme ? 1 : 0;
+  if (s.sound > SOUND_LOUD) s.sound = SOUND_QUIET;
+  s.clicks = s.clicks ? 1 : 0;
 
   board = loadBoard();
   board_sig(board, boardSig, sizeof boardSig);
+  // the buzzer only on a pin nothing else uses (a wiring changed since: no buzzer, rather than
+  // a tone on the motor driver's pins)
+  uint32_t freePins = buzzerPins(board);
+  s.buzzPin = (buzz < 32 && (freePins & (1u << buzz))) ? buzz : -1;
+  buzzer_init();
+  buzzer_pin(s.buzzPin);
   motor_init(toMotor(s), board.step, board.dir, board.en);
   input_init(board);
   lines = xQueueCreate(48, sizeof(Line));
   txq = xQueueCreate(24, sizeof(Line));
   haveScreen = display_init(board);
   if (haveScreen) {
-    UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove, boardSig};
+    UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove, boardSig, buzzer_play, buzzer_pin, freePins};
     ui_init(hal, s, millis());
   }
   // the serial task runs either way: without a screen the Pi still hears why

@@ -6,16 +6,47 @@
 enum Mood { MOOD_IDLE, MOOD_HAPPY, MOOD_WORK, MOOD_SLEEPY, MOOD_SAD };
 
 namespace pal {
-static const uint16_t BG = hex(0x0A080B);
-static const uint16_t PANEL = hex(0x19131A);
-static const uint16_t LINE = hex(0x2A2029);
-static const uint16_t PINK = hex(0xFF8DB5);
-static const uint16_t HOT = hex(0xFF4F9A);
-static const uint16_t LIGHT = hex(0xF7E3EC);
-static const uint16_t DIM = hex(0x8C7380);
-static const uint16_t FAINT = hex(0x4A3B44);
-static const uint16_t DARK = hex(0x170910);
+// The theme colours change with Settings → Screen → Theme (pal::theme). Both themes are SpinSlicer's
+// (spinslicer/theme.py DARK / LIGHT), so the printer looks like the program that feeds it. The names
+// say what a colour is for, not how it looks: LIGHT is the main text (ink in the light theme), ACT
+// the selection pill and the main buttons (SpinSlicer's "action": black in the light theme), DARK
+// the text on ACT.
+inline uint16_t BG = hex(0x0A080B);
+inline uint16_t PANEL = hex(0x19131A);
+inline uint16_t LINE = hex(0x2A2029);
+inline uint16_t PINK = hex(0xFF8DB5);    // the accent: links, progress, "on" values, dots
+inline uint16_t ACT = hex(0xFF8DB5);     // the selection pill, the Print card and buttons
+inline uint16_t HOT = hex(0xFF4F9A);
+inline uint16_t LIGHT = hex(0xF7E3EC);   // main text
+inline uint16_t DIM = hex(0x8C7380);     // second text
+inline uint16_t FAINT = hex(0x4A3B44);   // hints, off
+inline uint16_t DARK = hex(0x170910);    // text on ACT
+inline uint16_t ROWTXT = hex(0xD2B6C3);  // a row's name
+inline uint16_t WARN = hex(0xFF9DB8);    // reboot / power off rows
+inline uint16_t EDGE = hex(0x5A3346);    // a card's outline
+inline uint16_t SUBSEL = hex(0x5A2A3E);  // second text on a selected card
+inline uint16_t BTN = hex(0x8A4560);     // the Print button before it is chosen
+inline bool lightTheme = false;
 static const uint16_t WHITE = hex(0xFFFFFF);
+static const uint16_t INK = hex(0x170910);  // always dark: QR code modules on their white plate
+
+static inline void theme(bool light) {
+  if (light == lightTheme) return;
+  lightTheme = light;
+  if (light) {  // SpinSlicer LIGHT: paper, ink, a red-orange accent, black main actions
+    BG = hex(0xF6F4F0); PANEL = hex(0xE7E3DC); LINE = hex(0xDDD8D1);              // bg, surface_alt, border
+    PINK = hex(0xE5452B); HOT = hex(0xC93A22); ACT = hex(0x19171A);               // accent, accent_pressed, action
+    LIGHT = hex(0x19171A); DIM = hex(0x6C686B); FAINT = hex(0xA39E98); DARK = hex(0xF6F4F0);  // text, muted, dim, on_action
+    ROWTXT = hex(0x19171A); WARN = hex(0xB86A00); EDGE = hex(0xDDD8D1); SUBSEL = hex(0xA39E98);
+    BTN = hex(0x6C686B);
+  } else {
+    BG = hex(0x0A080B); PANEL = hex(0x19131A); LINE = hex(0x2A2029);
+    PINK = hex(0xFF8DB5); HOT = hex(0xFF4F9A); ACT = hex(0xFF8DB5);
+    LIGHT = hex(0xF7E3EC); DIM = hex(0x8C7380); FAINT = hex(0x4A3B44); DARK = hex(0x170910);
+    ROWTXT = hex(0xD2B6C3); WARN = hex(0xFF9DB8); EDGE = hex(0x5A3346); SUBSEL = hex(0x5A2A3E);
+    BTN = hex(0x8A4560);
+  }
+}
 // axolotl
 static const uint16_t SKIN_D = hex(0xC97C98);
 static const uint16_t SKIN = hex(0xEBB0C3);
@@ -66,7 +97,7 @@ static inline SpinnyPal spinnyPalette(int morph, float t) {
       p = {pal::SKIN_D, pal::SKIN, pal::SKIN_L, 0, pal::GILL, pal::GILL_L, pal::GILL_D, pal::EYE};
       break;
   }
-  p.fin = mix565(pal::BG, p.skin, 115);  // membrane: skin colour seen through, on the dark background
+  p.fin = mix565(pal::BG, p.skin, 115);  // membrane: skin colour seen through, on the background
   return p;
 }
 

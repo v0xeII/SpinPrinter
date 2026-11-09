@@ -20,6 +20,7 @@
 #include "qrcodegen.h"
 #include "spinny.h"
 #include "board.h"
+#include "buzzer.h"
 
 // this board's wiring, as text. The Raspberry asks for it (PINS) and finds the same string inside a
 // firmware file: it only offers an update built for these very pins (a release built for the stock
@@ -72,6 +73,7 @@ enum ItemId {
   // System: facts, not buttons (keep them together: infoRow() is a range)
   I_INF_VER, I_INF_RASP, I_INF_NET, I_INF_SPACE, I_INF_PRINTS, I_INF_PROJ, I_INF_BOARD,
   I_FWUP, I_SLEEP, I_UPD,
+  I_THEME, I_SOUND, I_CLICKS, I_BUZZ, I_G_SOUND,
   I_FILE,                          // a video in the list
   I_NONE,                          // past the end of a page
 };
@@ -86,17 +88,20 @@ static const Str ITEM_NAME[] = {
     S_G_MOTOR, S_G_DISPLAY, S_G_PROJ, S_G_SYSTEM, S_G_WIZARD,
     S_VERSION, S_PI, S_NET, S_SPACE, S_PRINTS, S_PROJECTOR, S_BOARD,
     S_FWUP, S_SLEEP, S_UPD_CHECK,
+    S_THEME, S_SOUND, S_CLICKS, S_BUZZER, S_G_SOUND,
     S_FILES,
     S_BACK,
 };
-enum PageId { PG_MAIN, PG_SETTINGS, PG_MOTOR, PG_DISPLAY, PG_PROJ, PG_SYSTEM, PG_FILES };
+enum PageId { PG_MAIN, PG_SETTINGS, PG_MOTOR, PG_DISPLAY, PG_PROJ, PG_SYSTEM, PG_SOUND, PG_FILES };
 static const ItemId MAIN_ITEMS[] = {I_PRINT, I_CONNECT, I_SETTINGS};
 // Settings is a short list of groups; every group is its own page (back = tilt left / long press)
 // the wizard first: it walks through all the rest
-static const ItemId SETTINGS_ITEMS[] = {I_G_WIZARD, I_G_MOTOR, I_G_PROJ, I_G_DISPLAY, I_G_SYSTEM};
+static const ItemId SETTINGS_ITEMS[] = {I_G_WIZARD, I_G_MOTOR, I_G_PROJ, I_G_DISPLAY, I_G_SOUND, I_G_SYSTEM};
 // rotation and the motor's own settings are one page: the everyday rows first
 static const ItemId MOTOR_ITEMS[] = {I_ROT, I_SPEED, I_DIR, I_ACCEL, I_MICRO, I_STEPS, I_GEAR, I_ONEREV, I_ZERO};
-static const ItemId DISPLAY_ITEMS[] = {I_BRIGHT, I_LANG, I_DARK, I_SLEEP, I_AXO_SHOW, I_AXO_COLOR};
+static const ItemId DISPLAY_ITEMS[] = {I_THEME, I_BRIGHT, I_LANG, I_DARK, I_SLEEP, I_AXO_SHOW, I_AXO_COLOR};
+// the buzzer first: without a pin there is nothing to hear
+static const ItemId SOUND_ITEMS[] = {I_BUZZ, I_SOUND, I_CLICKS};
 static const ItemId PROJ_ITEMS[] = {I_P_BLACK, I_P_WHITE, I_P_GRID, I_P_FOCUS, I_P_CIRCLE, I_P_CENTER, I_P_VIAL};
 // System shows what the printer is at once (short rows, skipped by the pill), then the buttons.
 // "Update firmware" is there only while the Raspberry offers one (FW line).
@@ -107,7 +112,7 @@ struct PageDef { const ItemId* items; int n; };
 static const PageDef PAGES[] = {{MAIN_ITEMS, PG_N(MAIN_ITEMS)},     {SETTINGS_ITEMS, PG_N(SETTINGS_ITEMS)},
                                 {MOTOR_ITEMS, PG_N(MOTOR_ITEMS)},   {DISPLAY_ITEMS, PG_N(DISPLAY_ITEMS)},
                                 {PROJ_ITEMS, PG_N(PROJ_ITEMS)},     {SYSTEM_ITEMS, PG_N(SYSTEM_ITEMS)},
-                                {nullptr, 0}};
+                                {SOUND_ITEMS, PG_N(SOUND_ITEMS)},   {nullptr, 0}};
 static const Str MORPH_NAME[MORPH_COUNT] = {S_C_PINK, S_C_GOLD, S_C_WILD, S_C_BLACK, S_C_BLUE, S_C_RGB};
 static const int MICRO_OPTS[] = {1, 2, 4, 8, 16, 32, 64, 128, 256};
 static const int STEPS_OPTS[] = {200, 400};
@@ -124,6 +129,10 @@ enum ScreenId { SC_BOOT, SC_MENU, SC_SETUP, SC_PRINT, SC_DONE, SC_CONNECT, SC_AS
 
 static UiHal H;
 static Settings S;
+// the buzzer, if there is one: buzzer.cpp keeps it rare (one sound at a time, none within 1.5 s)
+static void beep(int snd) {
+  if (H.beep && S.buzzPin >= 0) H.beep(snd, S.sound);
+}
 static ScreenId screen = SC_BOOT;
 static float now = 0, last = 0, enterT = 0, fps = 60;
 static uint32_t bootMs = 0;
@@ -155,7 +164,7 @@ static Ease bootHide; // Spinny waits until the logo is gone
 static Mood tempMood = MOOD_IDLE;
 static float tempMoodUntil = -1, lastInput = 0;
 
-static char toastText[64] = "";
+static char toastText[96] = "";
 static float toastUntil = -1;
 static Spring toast;
 
@@ -306,6 +315,16 @@ static bool oldSpinPi() { return piOk() && !sysSeen && now - piSince > 15; }
 static void say(const char* txt, float secs = 1.8f) {
   strncpy(toastText, txt, sizeof(toastText) - 1);
   toastText[sizeof(toastText) - 1] = 0;
+  // a long text is cut on a letter, never inside one (Cyrillic letters are 2 bytes)
+  size_t n = strlen(toastText), i = n;
+  if (n == sizeof(toastText) - 1) {
+    while (i > 0 && ((unsigned char)toastText[i - 1] & 0xC0) == 0x80) i--;  // i - 1: the last letter's first byte
+    if (i > 0) {
+      unsigned char c = (unsigned char)toastText[i - 1];
+      size_t len = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+      if (n - (i - 1) < len) toastText[i - 1] = 0;  // that letter did not fit whole
+    }
+  }
   toastUntil = now + secs;
   toast.target = 1;
 }
@@ -465,6 +484,15 @@ static void itemValue(ItemId it, char* b, size_t n) {
     case I_BRIGHT: snprintf(b, n, "%d%%", S.bright); break;
     case I_LANG: snprintf(b, n, "%s", T(S_LANGNAME)); break;
     case I_DARK: snprintf(b, n, "%s", S.dark ? T(S_ON) : T(S_OFF)); break;
+    case I_THEME: snprintf(b, n, "%s", T(S.theme ? S_TH_LIGHT : S_TH_DARK)); break;
+    case I_SOUND:
+      snprintf(b, n, "%s", T(S.sound == SOUND_LOUD ? S_SND_LOUD : (S.sound == SOUND_QUIET ? S_SND_QUIET : S_OFF)));
+      break;
+    case I_CLICKS: snprintf(b, n, "%s", S.clicks ? T(S_ON) : T(S_OFF)); break;
+    case I_BUZZ:
+      if (S.buzzPin < 0) snprintf(b, n, "%s", T(S_NONE));
+      else snprintf(b, n, T(S_BUZZ_PIN), S.buzzPin);
+      break;
     case I_AXO_SHOW: snprintf(b, n, "%s", T(S.home == HOME_AXO ? S_HOME_AXO : S_HOME_CARD)); break;
     case I_AXO_COLOR: snprintf(b, n, "%s", T(MORPH_NAME[S.axoColor % MORPH_COUNT])); break;
     case I_INF_VER:
@@ -829,6 +857,34 @@ static void activate() {
     case I_G_PROJ: pushPage(PG_PROJ); break;
     case I_G_MOTOR: pushPage(PG_MOTOR); break;
     case I_G_SYSTEM: pushPage(PG_SYSTEM); break;
+    case I_G_SOUND: pushPage(PG_SOUND); break;
+    case I_THEME: S.theme = !S.theme; H.save(S); break;  // the next frame is drawn in it
+    case I_BUZZ: {  // the next free pin, then none: the test note says which one is right
+      int p = S.buzzPin;
+      for (;;) {
+        if (++p >= 32) { p = -1; break; }
+        if (H.freePins & (1u << p)) break;
+      }
+      S.buzzPin = p;
+      if (H.buzzer) H.buzzer(p);
+      H.save(S);
+      if (p >= 0) {
+        if (H.beep) H.beep(SND_TEST, S.sound > SOUND_OFF ? S.sound : SOUND_QUIET);
+        say(T(S_BUZZ_HINT), 3);
+      }
+      break;
+    }
+    case I_SOUND:
+      if (S.buzzPin < 0) { say(T(S_BUZZ_FIRST)); break; }
+      S.sound = (S.sound + 1) % 3;
+      H.save(S);
+      if (H.beep) H.beep(SND_TEST, S.sound);
+      break;
+    case I_CLICKS:
+      if (S.buzzPin < 0) { say(T(S_BUZZ_FIRST)); break; }
+      S.clicks = !S.clicks;
+      H.save(S);
+      break;
     case I_G_WIZARD: startWizard(); break;
     case I_SLEEP: {
       int i = (indexOf(SLEEP_OPTS, 5, S.sleepMin) + 1) % 5;
@@ -907,6 +963,7 @@ void ui_key(Key k, uint32_t nowMs) {
   if (k == K_NONE) return;
   if (fwFlashing || updRun) return;  // the Raspberry is writing a new firmware / updating itself
   if (asleep) { asleep = false; H.brightness(S.bright); return; }  // the first touch only wakes the screen
+  if (S.clicks) beep(SND_TICK);
   if (screen == SC_BOOT) { afterBoot(); return; }
   if (wasSleepy && screen == SC_MENU) { mood(MOOD_HAPPY, 0.8f); hop(); return; }
 
@@ -1149,6 +1206,7 @@ void ui_line(const char* line, uint32_t nowMs) {
     int used = 0;
     if (sscanf(a, "%d %d %n", &askTurns, &askSec, &used) >= 2) {
       copyArg(askName, sizeof askName, a + used);
+      if (screen != SC_ASK) beep(SND_ASK);
       go(SC_ASK);
       mood(MOOD_HAPPY, 1.5f);
       hop(6);
@@ -1176,13 +1234,14 @@ void ui_line(const char* line, uint32_t nowMs) {
       strcpy(waitKind, "spin");
       waitSec = 0;
     }
-    else if (!strncmp(st, "DONE", 4)) go(SC_DONE);
+    else if (!strncmp(st, "DONE", 4)) { if (screen != SC_DONE) beep(SND_DONE); go(SC_DONE); }
     else if (!strncmp(st, "IDLE", 4)) { if (screen == SC_PRINT) { go(SC_MENU); say(T(S_STOPPED)); } }
     else if (!strncmp(st, "ERROR", 5)) {
       if (screen == SC_PRINT || screen == SC_SETUP || screen == SC_ASK) go(SC_MENU);
       snprintf(b, sizeof b, "%s%s%s", T(S_ERROR), st[5] ? ": " : "", st[5] ? st + 6 : "");
       say(b, 4);
       mood(MOOD_SAD, 4);
+      beep(SND_ERR);
     }
   } else if (!strncmp(line, "URL ", 4)) {
     copyArg(url, sizeof url, line + 4);
@@ -1294,9 +1353,9 @@ static void drawHomeCard(Canvas& c, float a, float sel) {
   x += (1 - a) * -16;
   float rr = 16;
   // no pulse and no glow: a still card costs nothing over SPI (a pulsing one resent ~50 KB a frame)
-  c.fillRoundRect(x, y, w, h, rr, lerpColor(PANEL, PINK, sel), a);
-  c.strokeRoundRect(x, y, w, h, rr, 1.5f, lerpColor(hex(0x5A3346), HOT, sel), a);
-  uint16_t ink = lerpColor(PINK, DARK, sel), sub = lerpColor(DIM, hex(0x5A2A3E), sel);
+  c.fillRoundRect(x, y, w, h, rr, lerpColor(PANEL, ACT, sel), a);
+  c.strokeRoundRect(x, y, w, h, rr, 1.5f, lerpColor(EDGE, HOT, sel), a);
+  uint16_t ink = lerpColor(PINK, DARK, sel), sub = lerpColor(DIM, SUBSEL, sel);
   char b[48], s2[48];
   if (!piOk()) snprintf(b, sizeof b, "%s", T(S_PI_NO));
   else if (knownVideos > 0) snprintf(b, sizeof b, "%s: %d", T(S_FILES), knownVideos);
@@ -1389,7 +1448,7 @@ static void drawEditCard(Canvas& c, float fx, float fy, float fw, float tx, floa
   int ocx0 = c.cx0, ocy0 = c.cy0, ocx1 = c.cx1, ocy1 = c.cy1;
   c.noClip();
   float rr = PILL_H / 2.f + 5 * clampf(e, 0, 1);
-  c.fillRoundRect(x, y, w, h, rr, PINK, alpha);
+  c.fillRoundRect(x, y, w, h, rr, ACT, alpha);
   int txw = (int)w - 12;  // text width
   int t0 = 20;           // the title's baseline below the top
   float ia = alpha * clampf((e - 0.55f) / 0.45f, 0, 1);
@@ -1496,7 +1555,7 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
   if (listA > 0.01f) {
     float stretch = clampf(fabsf(p.pill.vel) * 0.012f, 0, 5);
     float pillA = skip ? clampf(p.pill.v / ROW_H, 0, 1) : 1;  // melts into the card on the way up
-    c.fillRoundRect(LIST_X + dx, py - PILL_H / 2.f - stretch / 2, LIST_W, PILL_H + stretch, PILL_H / 2.f, PINK, listA * pillA);
+    c.fillRoundRect(LIST_X + dx, py - PILL_H / 2.f - stretch / 2, LIST_W, PILL_H + stretch, PILL_H / 2.f, ACT, listA * pillA);
     int n = pageCount(p);
     for (int i = skip; i < n; i++) {
       float ry = listTop + rowPos(p, i) - skip * ROW_H - p.scroll.v;
@@ -1511,7 +1570,7 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
         int vw = Canvas::textWidth(F_SM, v);
         int bw = files[i].usb ? Canvas::textWidth(F_SM, T(S_USB)) + 12 : 0;
         fitText(*FR, files[i].name, nm, sizeof nm, (int)LIST_W - 2 * ROW_PAD - 8 - vw - bw);
-        c.text(*FR, (int)(LIST_X + ROW_PAD + dx + k * 2), ty, nm, lerpColor(hex(0xD2B6C3), DARK, k), listA);
+        c.text(*FR, (int)(LIST_X + ROW_PAD + dx + k * 2), ty, nm, lerpColor(ROWTXT, DARK, k), listA);
         int rx = (int)(LIST_X + LIST_W - ROW_PAD + dx);
         c.textRight(F_SM, rx, ty - 1, v, vc, listA);
         if (files[i].usb) {
@@ -1535,8 +1594,8 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
         c.fillRect(lx, (int)(ry + infoH() / 2.f - 1), rx - lx, 1, LINE, listA);
         continue;
       }
-      uint16_t base = it == I_PRINT ? PINK : hex(0xD2B6C3);
-      if (it == I_POWEROFF || it == I_REBOOT) base = hex(0xFF9DB8);
+      uint16_t base = it == I_PRINT ? PINK : ROWTXT;
+      if (it == I_POWEROFF || it == I_REBOOT) base = WARN;
       char v[32];
       itemValue(it, v, sizeof v);
       const char* nm = T(ITEM_NAME[it]);
@@ -1562,7 +1621,8 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
         c.fillCircle(sx + cosf(ang) * 6, sy + sinf(ang) * 6, 2.2f, col, listA);
         continue;
       }
-      if ((it == I_ROT || it == I_DARK || it == I_AXO_SHOW) && v[0] && strcmp(v, T(S_OFF))) vc = lerpColor(PINK, DARK, k);
+      if ((it == I_ROT || it == I_DARK || it == I_AXO_SHOW || it == I_CLICKS || it == I_SOUND) && v[0] &&
+          strcmp(v, T(S_OFF))) vc = lerpColor(PINK, DARK, k);
       c.textRight(F_SM, (int)(LIST_X + LIST_W - ROW_PAD + dx), ty - 1, v, vc, listA);
     }
     float view = VISIBLE * ROW_H, all = pageHt(p);
@@ -1635,11 +1695,11 @@ static void drawSetup(Canvas& c, float dx, float ca, float dt) {
   const ItemId rows[3] = {I_SU_TURNS, I_SU_FACTOR, I_SU_DELAY};
   float pillY = rowY0 + suPill.v * rowH;
   float rowsA = la * (1 - clampf(suPill.v - 2, 0, 1));
-  if (suPill.v < 2.99f) c.fillRoundRect(rowX + dx, pillY - pillH / 2, rowW, pillH, pillH / 2, PINK, rowsA);
+  if (suPill.v < 2.99f) c.fillRoundRect(rowX + dx, pillY - pillH / 2, rowW, pillH, pillH / 2, ACT, rowsA);
   for (int i = 0; i < 3; i++) {
     float ry = rowY0 + i * rowH;
     float k = clampf(1 - fabsf(ry - pillY) / rowH, 0, 1) * (suPill.v < 2.99f ? 1 : 0);
-    c.text(F_SM, (int)(rowX + pad + dx + k * 2), (int)ry + 5, T(ITEM_NAME[rows[i]]), lerpColor(hex(0xD2B6C3), DARK, k), la);
+    c.text(F_SM, (int)(rowX + pad + dx + k * 2), (int)ry + 5, T(ITEM_NAME[rows[i]]), lerpColor(ROWTXT, DARK, k), la);
     char v[24];
     if (i == 0) { fmtTime(v, sizeof v, (int)lroundf(suTurns * f.revS)); snprintf(b, sizeof b, "%d · %s", suTurns, v); }
     else if (i == 1) snprintf(b, sizeof b, "%+.0f%%", (double)suFactor);
@@ -1651,7 +1711,7 @@ static void drawSetup(Canvas& c, float dx, float ca, float dt) {
   float pulse = s * (0.5f + 0.5f * sinf(now * 4));
   float grow = 3 * s, br = 18;
   if (s > 0.02f) c.glow(bx + bw / 2, by + bh / 2, 70, HOT, 0.28f * s * la + 0.08f * pulse * la);
-  c.fillRoundRect(bx - grow, by - grow, bw + grow * 2, bh + grow * 2, br, lerpColor(hex(0x8A4560), PINK, 0.35f + 0.65f * s), la);
+  c.fillRoundRect(bx - grow, by - grow, bw + grow * 2, bh + grow * 2, br, lerpColor(BTN, ACT, 0.35f + 0.65f * s), la);
   if (s > 0.02f) c.strokeRoundRect(bx - grow - 3, by - grow - 3, bw + grow * 2 + 6, bh + grow * 2 + 6, br + 3, 1.5f, LIGHT, s * la * (0.5f + 0.5f * pulse));
   c.textCentered(F_MD, (int)(bx + bw / 2), (int)(by + bh / 2 + 5), T(S_PRINT_BTN), DARK, la);
   c.textCentered(F_SM, (int)(bx + bw / 2), (int)(by + bh / 2 + 24), "OK", DARK, la * 0.55f * s);
@@ -1806,7 +1866,7 @@ static void drawDone(Canvas& c, float dx, float ca, float dt) {
   for (int i = 0; i < 3; i++) {  // the answer moves the exposure correction for the next print
     float y = by + i * (ph + 6);
     bool on = i == doneSel;
-    c.fillRoundRect(bx, y, pw, ph, ph / 2, on ? PINK : PANEL, ca);
+    c.fillRoundRect(bx, y, pw, ph, ph / 2, on ? ACT : PANEL, ca);
     c.text(F_SM, (int)(bx + 14), (int)y + 19, T(OPT[i]), on ? DARK : LIGHT, ca);
     if (on) c.textRight(F_SM, (int)(bx + pw - 14), (int)y + 19, "→", DARK, ca);
   }
@@ -1829,7 +1889,7 @@ static void drawAsk(Canvas& c, float dx, float ca) {
   float pulse = askSent ? 0 : 0.5f + 0.5f * sinf(now * 4);
   float bx = x, by = 112, bw = r - x, bh = 70;
   c.glow(bx + bw / 2, by + bh / 2, 70, HOT, 0.28f * ca + 0.08f * pulse * ca);
-  c.fillRoundRect(bx, by, bw, bh, 18, PINK, ca);
+  c.fillRoundRect(bx, by, bw, bh, 18, ACT, ca);
   c.strokeRoundRect(bx - 3, by - 3, bw + 6, bh + 6, 21, 1.5f, LIGHT, ca * (0.5f + 0.5f * pulse));
   c.textCentered(F_LG, (int)(bx + bw / 2), (int)(by + bh / 2 + 8), T(askSent ? S_ASK_STARTING : S_ASK_TITLE), DARK, ca);
   if (!askSent) c.text(F_SM, x, L.H - 8, T(S_SURE_HINT), FAINT, ca * 0.8f);
@@ -1859,7 +1919,7 @@ static void drawConnect(Canvas& c, float dx, float ca) {
   for (int yy = 0; yy < n; yy++)
     for (int xx = 0; xx < n; xx++)
       if (qrcodegen_getModule(qr, xx, yy))
-        c.fillRect((int)qx + (xx + 2) * sc, (int)qy + (yy + 2) * sc, sc, sc, DARK, ca * pop);
+        c.fillRect((int)qx + (xx + 2) * sc, (int)qy + (yy + 2) * sc, sc, sc, INK, ca * pop);
   int x = (int)(LIST_X + 6 + dx);
   c.text(F_MD, x, 52, T(S_OPEN_PHONE), LIGHT, ca);
   c.text(F_SM, x, 76, url, PINK, ca);
@@ -2150,6 +2210,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   last = now;
   fps += (1.f / dt - fps) * 0.05f;
 
+  pal::theme(S.theme && !(S.dark && screen == SC_PRINT));
   if (screen == SC_BOOT && now > 2.6f) afterBoot();
   if (screen == SC_PRINT && everRx && !piOk()) {  // the Pi vanished mid-print: stop the motor here
     motorOn = false;

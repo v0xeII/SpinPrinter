@@ -56,6 +56,9 @@ enum Str {
   S_READY, S_NO_RASP, S_NO_PROJ, S_OLD_SPINPI, S_UPD_HAVE,
   // updates over the air (the Raspberry asks GitHub)
   S_UPD_CHECK, S_UPD_SHORT, S_UPD_DO, S_UPD_NONE, S_UPD_ERR, S_UPD_PI, S_UPD_PI_SUB, S_UPD_LATEST, S_UPD_NOANSWER,
+  // theme + sound
+  S_THEME, S_TH_DARK, S_TH_LIGHT, S_G_SOUND, S_SOUND, S_SND_QUIET, S_SND_LOUD, S_CLICKS, S_BUZZER, S_BUZZ_PIN,
+  S_NONE, S_BUZZ_HINT, S_BUZZ_FIRST,
   S_COUNT
 };
 
@@ -106,6 +109,8 @@ static const char* const STR[2][S_COUNT] = {
         "Есть обновление %s",
         "Проверить обновления", "Обновления", "Обновить до", "нет новых", "ошибка", "Обновляю Raspberry…",
         "от 2 до 5 минут, перезапустится сама", "Всё обновлено", "Raspberry не ответила",
+        "Тема", "Тёмная", "Светлая", "Звук", "Громкость", "тихо", "громче", "Щелчки кнопок", "Пищалка", "пин %d",
+        "нет", "Пискнула? Нет: жми ещё раз", "Сначала выбери пин пищалки",
     },
     {
         "Print", "Connect", "Settings",
@@ -154,5 +159,7 @@ static const char* const STR[2][S_COUNT] = {
         "Update %s available",
         "Check for updates", "Updates", "Update to", "up to date", "error", "Updating the Raspberry…",
         "2 to 5 minutes, it restarts by itself", "Everything is up to date", "No answer from the Raspberry",
+        "Theme", "Dark", "Light", "Sound", "Volume", "quiet", "louder", "Button clicks", "Buzzer", "pin %d",
+        "none", "Did it beep? No: press again", "Pick the buzzer's pin first",
     },
 };

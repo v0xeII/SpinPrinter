@@ -25,14 +25,20 @@ of the main page, menus in Russian and English. Spinny the axolotl is optional.
   is not) → focus (↑↓ target / grid / circle) → centering → vial width (SpinSlicer needs this number) →
   direction (the vial turns, ↑↓ flips it) → exactly 1 turn (a mark shows if the gear ratio is right;
   ↑ again) → print speed (↑↓, live) → brightness → summary. ← on the first step skips it.
-- **Settings**: Setup wizard, Motor, Projector, Display, System, each its own page (no "Back" row: tilt
+- **Settings**: Setup wizard, Motor, Projector, Display, Sound, System, each its own page (no "Back" row: tilt
   left or long press goes back):
   - Motor: test spin, speed, direction, ramp, microsteps, steps per turn, gear, "exactly 1 turn", zero
     (live tachometer on the left). Changes made while the motor spins are applied when it stops.
-  - Display: brightness, language, dark screen while printing, **Sleep after** (backlight off after 1 / 5 /
+  - Display: **Theme** (dark or light, both SpinSlicer's; with "dark while printing" the print screen
+    stays dark so it does not shine on the resin), brightness, language, dark screen while printing, **Sleep after** (backlight off after 1 / 5 /
     15 / 30 idle minutes, 5 by default; the first touch only wakes it; a print, "Print?" and messages wake it); **Home**: Card (default: PRINT as a big card
     on top) or Axolotl (Spinny at the side); **Colour** of the axolotl: pink, gold, wild, black, blue, RGB.
   - Projector: Black, White, Grid, Focus, Circle, Center, Vial width.
+  - Sound (needs a buzzer, see Wiring): **Buzzer** (each press = the next free pin and a quiet beep: it
+    beeped = found), **Volume** (off / quiet / louder, quiet by default), **Button clicks** (off by
+    default). It is heard rarely: a soft chord when a print is done, two low notes on an error, a short
+    question when SpinSlicer waits for "Print?". Notes fade in and out, a second sound within 1.5 s is
+    dropped, nothing repeats.
   - System: the printer at a glance: firmware version, Raspberry (link, temperature), network (IP, Wi-Fi),
     free space (SD, USB stick), prints made, projector hours, board (uptime, fps). Buttons: **Check for
     updates** (then **Update to …**, see below), **Update firmware** (only with a fitting one on a USB
@@ -65,7 +71,7 @@ average speed is exact and every step is counted. The Raspberry asks for the ang
 
 - `SpinScreen/`: the firmware, opens in the Arduino IDE (`SpinScreen.ino`)
 - `SpinScreen/config.h`: the pins and hardware (the one setup), motor defaults
-- `screens/`: **screenshots of every screen** (drawn by the real UI: `sim/shots.cpp` + `dev/make_shots.py`)
+- `screens/`: **screenshots of every screen** (the light theme too: `screens_320x240_light.png`) (drawn by the real UI: `sim/shots.cpp` + `dev/make_shots.py`)
 - `tools/flash.sh`: build and flash in one command · `tools/pi_test.py`: pretend to be the Raspberry from a PC
 - `sim/`: the UI on a PC. `make virtual_esp`: a **virtual ESP32** in a window (the real UI, the joystick
   from the keyboard, motor, the link to SpinPi through a virtual serial port); `spinny_stress`: Spinny under lag for 20 minutes
@@ -94,6 +100,10 @@ average speed is exact and every step is counted. The Raspberry asks for the ang
 | SW | 12 |
 
 TMC2209 motor driver: STEP → 5, DIR → 6, EN → 7, plus a common GND with the ESP32; the motor has its own 12–24 V supply.
+
+Buzzer (optional): a **passive** one (no generator of its own), + to any free pin, − to GND. The pin is
+picked on the screen: Settings → Sound → Buzzer. Only pins the board's wiring does not use (and not USB
+or strapping pins) are offered, so an update over the air leaves it alone.
 
 To the Raspberry Pi: a USB cable that carries data (the board's USB-C to any Raspberry USB port).
 
@@ -139,7 +149,7 @@ to the bottom and sleeps after a minute without keys, dashes about on "Done!" an
 
 | Raspberry → ESP | does |
 |---|---|
-| `PING` | answers `PONG SpinScreen 0.8.7`; the Raspberry sends it every second |
+| `PING` | answers `PONG SpinScreen 0.8.8`; the Raspberry sends it every second |
 | `RPM 9.5` · `SPIN 1/0` | speed in rpm · motor on/off (with a ramp) |
 | `STATE PRINT/DONE/IDLE/ERROR text` · `PROG 42 80` | print state · progress 42 %, 80 s left |
 | `MSG text` | Spinny says it in a bubble |
@@ -162,7 +172,7 @@ to the bottom and sleeps after a minute without keys, dashes about on "Done!" an
 | `UPD CHECKING` · `UPD STEP text` · `UPD NONE` · `UPD AVAIL 0.9.0` · `UPD ERR text` | the answer to "Check for updates": a spinner turns in the row meanwhile, `STEP` says what is going on |
 | `UPD RUN pi` · `UPD IDLE` | the Raspberry updates itself ("Updating the Raspberry…") · a new SpinPi started |
 
-At power-up the board prints `READY SpinScreen 0.8.7 st7789_240x320 320x240 joystick` (and `noscreen` if the screen did not start).
+At power-up the board prints `READY SpinScreen 0.8.8 st7789_240x320 320x240 joystick` (and `noscreen` if the screen did not start).
 
 | ESP → Raspberry | when |
 |---|---|

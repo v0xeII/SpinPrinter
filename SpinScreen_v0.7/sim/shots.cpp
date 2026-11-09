@@ -36,6 +36,10 @@ static double hAngle() { return angle; }
 static void hCfg(const Settings&) {}
 static void hZero() { angle = 0; }
 static void hMove(double, float rpm) { tgtRpm = rpm; }
+static void hBeep(int snd, int level) { fprintf(stderr, "beep %d at %d\n", snd, level); }
+static void hBuzzer(int pin) { fprintf(stderr, "buzzer on pin %d\n", pin); }
+// a Super Mini with the stock wiring: 8, 9, 10 left over (+ the pins it does not break out)
+static const uint32_t FREE = (1u << 8) | (1u << 9) | (1u << 10) | (1u << 14) | (1u << 15) | (1u << 16);
 
 static Canvas* cv;
 static void frames(int ms) {  // run the UI at 60 fps for this long
@@ -85,17 +89,19 @@ static void shot(const char* name) {
 }
 
 int main(int argc, char** argv) {
-  bool axo = false, en = false;
+  bool axo = false, en = false, light = false;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "axo")) axo = true;
     else if (!strcmp(argv[i], "en")) en = true;
+    else if (!strcmp(argv[i], "light")) light = true;
     else dir = argv[i];
   }
   fb.assign(W * H, 0);
   Canvas c(W, H, fb.data());
   cv = &c;
-  UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove};
+  UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove, nullptr, hBeep, hBuzzer, FREE};
   Settings s{4.0f, en ? 1 : 0, 80, 16, 200, 6.f, 0, 1.0f, 1, axo ? HOME_AXO : HOME_CARD, 0};
+  s.theme = light ? 1 : 0;
   ui_init(hal, s, 0);
   line("URL http://192.168.1.42");
   line("HOST spinslicer.local");
@@ -110,7 +116,7 @@ int main(int argc, char** argv) {
     key(K_DOWN);
     key(K_OK, 900);
     shot("settings_axo");
-    for (int i = 0; i < 4; i++) key(K_DOWN, 200);
+    for (int i = 0; i < 5; i++) key(K_DOWN, 200);
     key(K_OK, 1200);  // Система beside Spinny: the narrow list must still fit
     shot("system_axo");
     return 0;
@@ -167,8 +173,18 @@ int main(int argc, char** argv) {
   key(K_OK, 800);  // edit the speed
   shot("edit_speed");
   key(K_OK);
-  key(K_BACK, 900);  // back to the groups
-  for (int i = 0; i < 3; i++) key(K_DOWN, 200);
+  key(K_BACK, 900);  // back to the groups (on Мотор)
+  key(K_DOWN, 200);
+  key(K_DOWN, 200);
+  key(K_OK, 1000);  // Экран: the theme on top
+  shot("display");
+  key(K_BACK, 900);
+  key(K_DOWN, 200);
+  key(K_OK, 1000);  // Звук
+  key(K_OK, 900);  // Пищалка: the first free pin, and a test note
+  shot("sound");
+  key(K_BACK, 900);
+  key(K_DOWN, 200);
   key(K_OK, 1200);  // Система: the printer's facts + the buttons (the pill starts on "Проверить обновления")
   shot("system");
   key(K_OK, 300);  // -> EV UPDCHECK; the Raspberry answers from GitHub
@@ -192,7 +208,7 @@ int main(int argc, char** argv) {
   frames(400);
   // the first-setup wizard (Настройки → Мастер настройки)
   key(K_BACK, 900);
-  for (int i = 0; i < 4; i++) key(K_UP, 200);
+  for (int i = 0; i < 5; i++) key(K_UP, 200);
   key(K_OK, 900);
   shot("wiz_hello");
   key(K_OK, 900);  // -> the links

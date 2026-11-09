@@ -22,6 +22,10 @@ struct Settings {
   int axoColor;   // colour morph (spinny.h MORPH_*)
   int sleepMin = 5;  // backlight off after this many idle minutes (0 = never)
   int wizard = 1;    // 0 = the first-setup wizard has not been through yet (shown after the logo)
+  int theme = 0;     // 0 = dark, 1 = light (the print screen stays dark while "dim while printing" is on)
+  int sound = 1;     // buzzer.h SOUND_OFF / SOUND_QUIET / SOUND_LOUD
+  int clicks = 0;    // 1 = a soft tick on every button
+  int buzzPin = -1;  // the buzzer's GPIO, -1 = none
 };
 
 // What the UI needs from the hardware. main.cpp fills this in; the simulator fakes it.
@@ -36,6 +40,9 @@ struct UiHal {
   void (*motorZero)();
   void (*motorMove)(double deg, float rpm);  // exact turn ("1 оборот" test)
   const char* wiring = nullptr;  // the wiring in use ("43,44,..."), kept in the board's flash (board.h)
+  void (*beep)(int sound, int level) = nullptr;  // buzzer.h; nullptr = no buzzer support
+  void (*buzzer)(int pin) = nullptr;             // the buzzer moved to this pin (-1 = none)
+  uint32_t freePins = 0;  // bit n = GPIO n is free for the buzzer (not in the wiring, not USB or strapping)
 };
 
 void ui_init(const UiHal& hal, const Settings& s, uint32_t nowMs);

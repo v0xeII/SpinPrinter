@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 LAYOUTS = [  # name, extra args, title
     ("screens_320x240", [], "SpinScreen 320x240 · ST7789 2.4\" · KY-023"),
     ("screens_320x240_en", ["en"], "SpinScreen 320x240 · ST7789 2.4\" · KY-023 (English)"),
+    ("screens_320x240_light", ["light"], "SpinScreen 320x240 · ST7789 2.4\" · KY-023 (светлая тема)"),
 ]
 SCALE = 2
 BG = (10, 8, 11)
