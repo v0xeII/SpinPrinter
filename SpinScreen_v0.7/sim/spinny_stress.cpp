@@ -17,7 +17,7 @@
 const SpinnyBody& ui_probe_body();
 void ui_probe_area(float* a);
 extern float ui_probe_sa;
-static const char* SCR[] = {"boot", "menu", "setup", "print", "done", "about", "connect"};
+static const char* SCR[] = {"boot", "menu", "setup", "print", "done", "connect", "ask"};
 static long outBy[7][4];  // screen x edge (left, right, top, bottom)
 
 static float cur = 0, tgt = 0;

@@ -136,18 +136,18 @@ void input_debug(char* out, int n) {
   snprintf(out, n, "JOY ud pin%d ok%d c%d pull%d..%d spread%d..%d now%d | lr pin%d ok%d c%d pull%d..%d spread%d..%d now%d | sw%d",
            axUD.pin, axUD.ok, axUD.centre, axUD.lo, axUD.hi, axUD.mn, axUD.mx, axUD.last,
            axLR.pin, axLR.ok, axLR.centre, axLR.lo, axLR.hi, axLR.mn, axLR.mx, axLR.last,
-           digitalRead(PIN_JOY_SW));
+           digitalRead(ok.pin));
 }
 
 // ------------------------------------------------------------------
-void input_init() {
-  ok.pin = PIN_JOY_SW;
-  pinMode(PIN_JOY_SW, INPUT_PULLUP);
+void input_init(const Board& b) {
+  ok.pin = b.joySw;
+  pinMode(b.joySw, INPUT_PULLUP);
   // which physical axis is "up/down" and which is "OK/back"
-  axUD.pin = JOY_SWAP_XY ? PIN_JOY_X : PIN_JOY_Y;
-  axLR.pin = JOY_SWAP_XY ? PIN_JOY_Y : PIN_JOY_X;
-  axUD.invert = JOY_INVERT_Y;
-  axLR.invert = JOY_INVERT_X;
+  axUD.pin = b.swapXY ? b.joyX : b.joyY;
+  axLR.pin = b.swapXY ? b.joyY : b.joyX;
+  axUD.invert = b.invY;
+  axLR.invert = b.invX;
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);  // the full 0..3.3 V range
   // the centre: the stick must be left alone at power-up

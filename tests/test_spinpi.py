@@ -315,9 +315,14 @@ class FakeMpv(FakeSpinProj):
 
 class FakeWarm:
     connected = True
+    on_s = 0.0
 
     def left(self, minutes):
         return 0.0
+
+    def take_on_s(self):
+        s, self.on_s = self.on_s, 0.0
+        return s
 
 
 def make_printer(tmp, proj=None, **settings):
@@ -748,6 +753,270 @@ class MdnsTest(Tmp):
         text = rt(here)
         self.assertIn("<type>_spinprinter._tcp</type>", text)
         self.assertIn("<txt-record>api=1</txt-record>", text)
+
+
+# ------------------------------------------------------------------------------------------ System page, firmware
+PINS = "43,44,1,2,3,4,1,40,3,1,0,13,11,12,0,0,0,5,6,7"
+MINE = "43,44,1,2,3,4,1,40,3,1,0,13,11,12,0,0,0,8,9,10"
+
+
+def esp_app(strings):
+    """A tiny but well-formed ESP32 app image: header, one segment holding the strings, checksum, SHA-256."""
+    seg = strings + b"\x00" * (-len(strings) % 4)
+    head = bytearray(24)
+    head[0], head[1], head[23] = 0xE9, 1, 1
+    body = bytes(head) + (0x3C000000).to_bytes(4, "little") + len(seg).to_bytes(4, "little") + seg
+    body += b"\x00" * (16 - len(body) % 16)
+    return body + b"\x11" * 32
+
+
+def fake_firmware(path, version, pins=PINS, merged=True, build="local"):
+    """Bytes shaped like a SpinScreen firmware: the strings the Raspberry looks for; merged = a whole
+    flash image with a partition table at 0x8000 and the app at 0x10000."""
+    s = b"PONG SpinScreen " + version.encode() + b"\x00"
+    s += b"SPINPINS %s nvs\x00"  # the answer's format string comes first in a real firmware
+    if pins:
+        s += b"SPINPINS " + pins.encode() + b"\x00"
+    if build:
+        s += b"SPINBUILD " + build.encode() + b"\x00"
+    app = esp_app(s)
+    if merged:
+        img = bytearray(b"\xff" * 0x10000)
+        img[0] = 0xE9
+        img[0x8000:0x8002] = b"\xaa\x50"
+        data = bytes(img) + app + b"\xff" * 4096
+    else:
+        data = app
+    wb(path, data)
+    return app
+
+
+class SystemPage(Tmp):
+    def test_sys_line(self):
+        info = {"ip": "192.168.1.42", "wifi": 72, "temp": 48.26, "sd_free_gb": 12.44, "usb_free_gb": None,
+                "prints": 14, "projector_h": 3.21}
+        self.assertEqual(spinpi.sys_line(info),
+                         "SYS ip=192.168.1.42 wifi=72 temp=48 sd=12.4 usb=- prints=14 proj=3.2 hdmi=-")
+        self.assertEqual(spinpi.sys_line({}), "SYS ip=- wifi=- temp=- sd=- usb=- prints=- proj=- hdmi=-")
+
+    def test_counters(self):
+        pr, _ = make_printer(self.tmp)
+        pr.warm.on_s = 1800
+        pr.tick_counters()
+        pr.warm.on_s = 1800
+        pr.tick_counters()
+        info = pr.system_info()
+        self.assertAlmostEqual(info["projector_h"], 1.0)
+        self.assertEqual(info["prints"], 0)
+        self.assertIsNotNone(info["sd_free_gb"])
+        self.assertIsNotNone(info["usb_free_gb"])  # the fake stick is a folder on this disk
+        self.assertTrue(spinpi.sys_line(info).startswith("SYS ip="))
+
+    def test_firmware_info_finds_the_app(self):
+        app = fake_firmware(self.path("a.bin"), "0.8.5", build="release")
+        fake_firmware(self.path("b.bin"), "0.8.6-test", pins=None, merged=False, build=None)
+        a = spinpi.firmware_info(self.path("a.bin"), "release")
+        b = spinpi.firmware_info(self.path("b.bin"), "usb")
+        self.assertEqual((a["version"], a["pins"], a["merged"], a["build"]), ("0.8.5", PINS, True, "release"))
+        self.assertEqual((a["app_offset"], a["app_len"]), (0x10000, len(app)))  # not the 0xFF after it
+        self.assertEqual((b["version"], b["pins"], b["merged"], b["build"], b["app_offset"]),
+                         ("0.8.6-test", None, False, "local", 0))
+        wb(self.path("junk.bin"), b"\x00" * 100)
+        self.assertIsNone(spinpi.firmware_info(self.path("junk.bin"), "usb"))
+
+    def test_only_spinscreen_files_on_sticks(self):
+        os.makedirs(self.path("stick"))
+        fake_firmware(self.path("stick", "SpinScreen.ino.merged.bin"), "0.8.5-mine")
+        fake_firmware(self.path("stick", "other.bin"), "9.9.9")  # not named spinscreen: left alone
+        files = spinpi.firmware_files([self.path("stick")])
+        self.assertEqual([(f["source"], f["version"]) for f in files], [("usb", "0.8.5-mine")])
+
+    def test_what_fits_the_board(self):
+        mine = {"build": "local", "pins": MINE}
+        stock = {"build": "local", "pins": PINS}
+        release = {"build": "release", "pins": PINS}
+        self.assertTrue(spinpi.firmware_fits(mine, MINE, False))  # a build for these very pins
+        self.assertFalse(spinpi.firmware_fits(stock, MINE, True))  # stock pins compiled in: never
+        self.assertTrue(spinpi.firmware_fits(release, MINE, True))  # a release keeps the board's wiring
+        self.assertFalse(spinpi.firmware_fits(release, MINE, False))  # ...if the board keeps one
+        self.assertFalse(spinpi.firmware_fits(release, None, True))  # the board did not say (before 0.8.5)
+
+    def test_stick_offer(self):
+        usb = {"source": "usb", "version": "0.8.4-mine", "pins": MINE, "build": "local"}
+        self.assertEqual(spinpi.pick_firmware([usb], "0.8.5", MINE), usb)  # put there on purpose
+        self.assertIsNone(spinpi.pick_firmware([dict(usb, version="0.8.5")], "0.8.5", MINE))  # the same one
+        self.assertIsNone(spinpi.pick_firmware([usb], "0.8.5", PINS))  # other pins
+
+    def test_stick_update_from_the_screen(self):
+        pr, stick = make_printer(self.tmp)
+        esp = pr.esp
+        esp.version, esp.pins = "0.8.5", PINS
+        paused = []
+        esp.pause = lambda: paused.append("pause") or "/dev/ttyACM0"
+        esp.resume = lambda: paused.append("resume")
+        fake_firmware(os.path.join(stick, "spinscreen.bin"), "0.8.6")
+        pr.refresh_firmware()
+        self.assertEqual(esp.sent[-1], "FW 0.8.6 usb")
+        self.assertEqual(pr.status()["firmware"]["offer"], {"version": "0.8.6", "source": "usb"})
+        wrote = []
+        pr.firmware_update(flash=lambda f, port: wrote.append((f["path"], port)) or (True, "ok"))
+        self.assertEqual(wrote, [(os.path.join(stick, "spinscreen.bin"), "/dev/ttyACM0")])
+        self.assertEqual(paused, ["pause", "resume"])
+        self.assertIn("FWUP", esp.sent)
+        self.assertIn("FWUP END", esp.sent)
+        self.assertEqual(pr.fw_state["state"], "ok")
+        self.assertIsNone(pr.fw_offer)
+
+    def test_no_update_while_printing(self):
+        pr, _ = make_printer(self.tmp)
+        pr.fw_offer = {"version": "0.8.6", "source": "usb", "path": "x", "merged": True}
+        pr.state = "print"
+        pr.firmware_update(flash=lambda f, port: self.fail("must not flash during a print"))
+        self.assertEqual(pr.fw_state["state"], "idle")
+        pr.check_updates(latest=lambda: self.fail("must not check during a print"))
+        self.assertTrue(pr.esp.sent[-1].startswith("UPD ERR"))
+
+    def test_esp_reports_pins(self):
+        esp = spinpi.Esp.__new__(spinpi.Esp)  # no reader thread
+        esp.pos_cv, esp.pos, esp.connected, esp.greeting = threading.Condition(), None, True, []
+        esp.on_event, esp.port, esp.ser, esp.lock = (lambda ev: None), "/dev/ttyACM0", None, threading.Lock()
+        esp.version, esp.pins, esp.pins_asked, esp.nvs = "0.8.5", None, None, False
+        esp.on_line("SPINPINS " + MINE + " nvs")
+        self.assertEqual((esp.pins, esp.nvs), (MINE, True))
+        esp.on_line("SPINPINS " + PINS)  # a firmware before the wiring was kept on the board
+        self.assertEqual((esp.pins, esp.nvs), (PINS, False))
+        esp.on_line("PONG SpinScreen 0.8.6")  # another firmware: ask again
+        self.assertIsNone(esp.pins)
+
+
+class OverTheAir(Tmp):
+    """Settings → System → "Check for updates" → "Update to …": GitHub is faked."""
+
+    def setUp(self):
+        super().setUp()
+        self.pr, _ = make_printer(self.tmp)
+        self.esp = self.pr.esp
+        self.esp.version, self.esp.pins, self.esp.nvs = "0.8.4", MINE, True
+        self.esp.pause = lambda: "/dev/ttyACM0"
+        self.esp.resume = lambda: None
+        self.downloads = []
+
+    def fetch(self, build="release", pins=PINS):
+        def f(url, dst):
+            self.downloads.append(url)
+            fake_firmware(dst, "0.9.0", pins=pins, build=build)
+        return f
+
+    def test_nothing_new(self):
+        self.esp.version = spinpi.VERSION
+        self.pr.check_updates(latest=lambda: "v" + spinpi.VERSION, fetch=self.fetch())
+        self.assertEqual(self.esp.sent[-1], "UPD NONE")
+        self.assertEqual(self.downloads, [])
+
+    def test_no_internet(self):
+        def down():
+            raise OSError("no route to host")
+        self.pr.check_updates(latest=down)
+        self.assertEqual(self.esp.sent[-3:], ["UPD CHECKING", "UPD STEP Спрашиваю GitHub…", "UPD ERR Нет связи с GitHub"])
+        self.assertEqual(self.pr.status()["update"]["state"], "error")
+
+    def test_both_are_updated(self):
+        self.pr.check_updates(latest=lambda: "v0.9.0", fetch=self.fetch())
+        self.assertEqual(self.esp.sent[-1], "UPD AVAIL 0.9.0")
+        self.assertEqual(self.downloads, [spinpi.release_firmware_url("v0.9.0")])
+        self.assertEqual(self.pr.status()["update"]["available"], {"version": "0.9.0", "raspberry": True, "board": True})
+        flashed, ran = [], []
+        self.pr.run_update(flash=lambda f, port: flashed.append(f["version"]) or (True, "ok"),
+                           run=lambda cmd, **kw: ran.append(cmd), watch=False)
+        self.assertEqual(flashed, ["0.9.0"])  # the board first, while SpinPi can still write it
+        self.assertEqual(len(ran), 1)
+        self.assertEqual(ran[0][:2], ["systemd-run", "--unit=spinprinter-update"])  # outside spinpi.service
+        self.assertIn("SPINPRINTER_REF=v0.9.0 SPINPRINTER_NO_REBOOT=1", ran[0][-1])
+        self.assertEqual(self.esp.sent[-1], "UPD RUN pi")
+        self.assertEqual(self.pr.settings["update_pending"], "v0.9.0")
+        # the new SpinPi starts: it says how it went, once
+        again = spinpi.Printer(FakeEsp(), FakeSpinProj(), self.pr.lib, self.pr.data, 1280, 800, FakeWarm())
+        self.assertEqual(again.update_done, "v0.9.0")
+        self.assertNotIn("update_pending", again.settings)
+
+    def test_board_with_its_own_pins_and_an_old_release(self):
+        # a release from before the wiring was kept on the board has the stock pins compiled in
+        self.pr.check_updates(latest=lambda: "v0.9.0", fetch=self.fetch(build=None))
+        self.assertEqual(self.esp.sent[-1], "UPD AVAIL 0.9.0")  # the Raspberry still gets it
+        self.assertIsNone(self.pr.update["fw"])  # the board does not
+        self.esp.version = "0.9.0"  # board already new, Raspberry too: nothing
+        self.pr.update = None
+
+    def test_firmware_only(self):
+        self.pr.check_updates(latest=lambda: "v" + spinpi.VERSION, fetch=self.fetch())
+        if version_newer(spinpi.VERSION, "0.8.4"):
+            self.assertEqual(self.esp.sent[-1], "UPD AVAIL " + spinpi.VERSION)
+            self.pr.run_update(flash=lambda f, port: (True, "ok"), run=lambda *a, **k: self.fail("no Raspberry update"))
+            self.assertEqual(self.esp.sent[-1], "UPD IDLE")
+
+    def test_a_failed_firmware_stops_there(self):
+        self.pr.check_updates(latest=lambda: "v0.9.0", fetch=self.fetch())
+        self.pr.run_update(flash=lambda f, port: (False, "timeout"), run=lambda *a, **k: self.fail("must stop"))
+        self.assertEqual(self.esp.sent[-1], "UPD ERR Прошивка платы не записана")
+
+
+class PartShape(Tmp):
+    """The part's silhouette for the print screen (SHAPE lines from the .spin preview)."""
+
+    @staticmethod
+    def image(w, h, inside, bg=(20, 20, 30, 255), fg=(200, 120, 160, 255)):
+        return b"".join(bytes(fg if inside(x, y) else bg) for y in range(h) for x in range(w))
+
+    @staticmethod
+    def decode(lines):
+        """What the screen does with the lines: back to rows of 0/1."""
+        size = int(lines[0].split()[2])
+        bpr = (size + 7) // 8
+        bits = bytearray(size * bpr)
+        for ln in lines[1:-1]:
+            _, y, hx = ln.split()
+            raw = bytes.fromhex(hx)
+            bits[int(y) * bpr:int(y) * bpr + len(raw)] = raw
+        return [[(bits[y * bpr + x // 8] >> (7 - x % 8)) & 1 for x in range(size)] for y in range(size)]
+
+    def test_solid_background(self):
+        # a 20 x 40 bar in a 128 x 128 picture: cut out, fitted to 56 high, centred
+        rgba = self.image(128, 128, lambda x, y: 50 <= x < 70 and 30 <= y < 70)
+        lines = spinpi.shape_lines(spinpi.shape_mask(rgba, 128, 128))
+        self.assertEqual(lines[0], "SHAPE BEGIN 56 56")
+        self.assertEqual(lines[-1], "SHAPE END")
+        self.assertEqual(len(lines), 2 + 7)  # 8 rows a line
+        self.assertTrue(all(len(ln) < 160 for ln in lines))  # the board's line limit
+        rows = self.decode(lines)
+        cols = [x for x in range(56) if any(r[x] for r in rows)]
+        self.assertEqual(sum(1 for r in rows if any(r)), 56)  # the full height
+        self.assertEqual((cols[0], cols[-1]), (14, 41))  # 28 wide, in the middle
+
+    def test_transparent_background(self):
+        rgba = self.image(64, 64, lambda x, y: (x - 32) ** 2 + (y - 32) ** 2 < 400,
+                          bg=(255, 255, 255, 0), fg=(255, 255, 255, 255))
+        rows = self.decode(spinpi.shape_lines(spinpi.shape_mask(rgba, 64, 64)))
+        self.assertEqual(rows[28][28], 1)  # the middle of the disc
+        self.assertEqual(rows[0][0], 0)  # a corner is background
+
+    def test_nothing_to_draw(self):
+        self.assertIsNone(spinpi.shape_lines(spinpi.shape_mask(self.image(32, 32, lambda x, y: False), 32, 32)))
+
+    def test_sent_before_the_print(self):
+        pr, _ = make_printer(self.tmp)
+        pr.lib.thumb_file = lambda fid: (self.path("p.png"), "image/png" if fid == "spin" else "image/jpeg")
+        made = []
+        shape = ["SHAPE BEGIN 56 56", "SHAPE 0 FF", "SHAPE END"]
+        pr.send_shape("spin", make=lambda png: made.append(png) or shape)
+        pr.send_shape("spin", make=lambda png: self.fail("made once, then kept"))
+        self.assertEqual(pr.esp.sent[-3:], shape)
+        self.assertEqual(made, [self.path("p.png")])
+        pr.send_shape("video", make=lambda png: self.fail("a plain video has no silhouette"))
+        self.assertEqual(pr.esp.sent[-1], "SHAPE -")
+
+
+def version_newer(a, b):
+    return spinpi.version_tuple(a) > spinpi.version_tuple(b)
 
 
 if __name__ == "__main__":

@@ -84,7 +84,7 @@
 
   <!-- ============ notes ============ -->
   <g font-size="14">
-    <text x="40" y="560" font-weight="700" fill="#ff8db5">The board and the Pi: one USB cable.</text>
+    <text x="40" y="560" font-weight="700" fill="#ff8db5">The board and the Raspberry: one USB cable.</text>
     <text x="40" y="586" fill="#a88f9b">A charge-only cable shows no port: take another.</text>
     <text x="40" y="630" fill="#f7e3ec">Screen and joystick get 3V3, never 5V.</text>
     <text x="40" y="674" fill="#a88f9b">Leave the stick alone at power-up:</text>

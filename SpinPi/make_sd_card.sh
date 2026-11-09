@@ -1,6 +1,6 @@
 #!/bin/bash
 # SD-карта для принтера: Raspberry Pi OS Lite 64-bit + SpinPi, которая сама ставится при первом
-# включении Pi. Запуск на компьютере (Linux), карта в картридере:
+# включении Raspberry. Запуск на компьютере (Linux), карта в картридере:
 #
 #     sudo bash SpinPi/make_sd_card.sh
 #
@@ -62,12 +62,12 @@ mkdir -p "$WORK"/{boot,root}
 
 # ---------------------------------------------------------------- 2. your Wi-Fi
 say "2/6 Wi-Fi для принтера"
-echo "Pi подключится к твоему роутеру. Пароль вводишь только ты: он не показывается и"
-echo "записывается только на карту. Без Wi-Fi можно подключить Pi кабелем к роутеру: тогда Enter."
+echo "Raspberry подключится к твоему роутеру. Пароль вводишь только ты: он не показывается и"
+echo "записывается только на карту. Без Wi-Fi можно подключить Raspberry кабелем к роутеру: тогда Enter."
 while true; do
 	read -rp "Имя Wi-Fi сети (как в телефоне): " SSID
 	[ -n "$SSID" ] && break
-	read -rp "Без Wi-Fi Pi нужен сетевой кабель от роутера. Будет кабель? (да/нет): " CABLE
+	read -rp "Без Wi-Fi Raspberry нужен сетевой кабель от роутера. Будет кабель? (да/нет): " CABLE
 	[ "$CABLE" = "да" ] || [ "$CABLE" = "yes" ] && break
 done
 PSK=""
@@ -83,7 +83,7 @@ if [ -n "$SSID" ]; then
 	PSK2=""
 	[ -z "$PSK" ] || [ "${#PSK}" -ge 8 ] || die "пароль Wi-Fi короче 8 символов: так не бывает, проверь"
 else
-	echo "Хорошо: при первом включении подключи Pi сетевым кабелем к роутеру."
+	echo "Хорошо: при первом включении подключи Raspberry сетевым кабелем к роутеру."
 fi
 for p in $(lsblk -lnpo NAME "$DEV" | tail -n +2); do umount "$p" 2>/dev/null || true; done
 
@@ -178,7 +178,7 @@ EOF
 # cloud-init creates the user, and with it masked the user was never made. install.sh turns the
 # screen login off once SpinPi is there.)
 
-# SpinPi + SpinProj: copied now, installed by the Pi itself on the first start (needs internet)
+# SpinPi + SpinProj: copied now, installed by the Raspberry itself on the first start (needs internet)
 mkdir -p "$WORK/root/opt/spinprinter-src"
 cp -r "$ROOT/SpinPi" "$ROOT/SpinProj" "$WORK/root/opt/spinprinter-src/"
 rm -f "$WORK/root/opt/spinprinter-src/SpinProj/spinproj"
@@ -205,7 +205,7 @@ mkdir -p "$WORK/root/etc/systemd/system/multi-user.target.wants"
 ln -sf /etc/systemd/system/spinprinter-firstboot.service \
 	"$WORK/root/etc/systemd/system/multi-user.target.wants/spinprinter-firstboot.service"
 
-# boot diary on the boot partition (readable on any computer, even if the Pi hangs)
+# boot diary on the boot partition (readable on any computer, even if the Raspberry hangs)
 cat >"$WORK/root/etc/systemd/system/spinprinter-bootlog.service" <<'EOF'
 [Unit]
 Description=SpinPrinter: boot diary on the boot partition (spinprinter-log.txt)
@@ -220,7 +220,7 @@ WantedBy=multi-user.target
 EOF
 ln -sf /etc/systemd/system/spinprinter-bootlog.service \
 	"$WORK/root/etc/systemd/system/multi-user.target.wants/spinprinter-bootlog.service"
-echo "Записано: $(date '+%F %T'). Если Pi не загрузится, здесь появится spinprinter-log.txt." >"$WORK/boot/spinprinter-log.txt"
+echo "Записано: $(date '+%F %T'). Если Raspberry не загрузится, здесь появится spinprinter-log.txt." >"$WORK/boot/spinprinter-log.txt"
 
 # ---------------------------------------------------------------- 6. done
 say "6/6 Завершаю запись"
@@ -230,13 +230,13 @@ echo
 echo "Готово! Карта для принтера записана."
 echo
 echo "  1. Вставь карту в Raspberry Pi."
-echo "  2. ESP32 с экраном подключи к Pi USB-кабелем (любой USB-порт Pi)."
-[ -n "$SSID" ] || echo "     И сетевой кабель от роутера в Pi: без Wi-Fi ей нужен интернет по кабелю."
-echo "  3. Включи питание Pi (свой блок: Pi 3 и Zero 2 W — 5 В 2,5 А, Pi 4 — 3 А, Pi 5 — 5 А)."
+echo "  2. ESP32 с экраном подключи к Raspberry USB-кабелем (любой USB-порт Raspberry)."
+[ -n "$SSID" ] || echo "     И сетевой кабель от роутера в Raspberry: без Wi-Fi ей нужен интернет по кабелю."
+echo "  3. Включи питание Raspberry (свой блок: Pi 3 и Zero 2 W — 5 В 2,5 А, Pi 4 — 3 А, Pi 5 — 5 А)."
 echo "     Первый запуск: 10–20 минут"
-echo "     (Pi сама скачает и поставит программы). Не выключай её всё это время."
-echo "  4. Когда на экране ESP появится «Pi на связи», открой  http://spinslicer.local"
+echo "     (Raspberry сама скачает и поставит программы). Не выключай её всё это время."
+echo "  4. Когда на экране ESP появится «Raspberry на связи», открой  http://spinslicer.local"
 echo
-echo "  Зайти на Pi (без пароля):  ssh pi@spinslicer.local"
+echo "  Зайти на Raspberry (без пароля):  ssh pi@spinslicer.local"
 echo "  Как идёт установка:        ssh pi@spinslicer.local tail -f /var/log/spinprinter-firstboot.log"
 echo "  Не работает? Вынь карту, вставь в компьютер: в разделе bootfs файл spinprinter-log.txt."

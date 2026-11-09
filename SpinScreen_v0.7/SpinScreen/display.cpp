@@ -104,47 +104,47 @@ static void window(int x, int y, int w, int h) {
 // ST7789 orientation (MADCTL) per rotation 0..3; odd = landscape. MV swaps the axes, MX / MY mirror.
 static const uint8_t MAD_ST7789[4] = {0x00, 0x60, 0xC0, 0xA0};
 
-bool display_init() {
-  int rot = TFT_ROTATION & 3;
+bool display_init(const Board& b) {
+  int rot = b.rotation & 3;
   W = (rot & 1) ? 320 : 240;
   H = (rot & 1) ? 240 : 320;
-  pinDC = PIN_TFT_DC;
-  pinBLK = PIN_TFT_BLK;
-  pinMode(PIN_TFT_DC, OUTPUT);
-  pinMode(PIN_TFT_RES, OUTPUT);
-  digitalWrite(PIN_TFT_RES, HIGH);
+  pinDC = b.tftDc;
+  pinBLK = b.tftBlk;
+  pinMode(b.tftDc, OUTPUT);
+  pinMode(b.tftRes, OUTPUT);
+  digitalWrite(b.tftRes, HIGH);
   delay(5);
-  digitalWrite(PIN_TFT_RES, LOW);
+  digitalWrite(b.tftRes, LOW);
   delay(20);
-  digitalWrite(PIN_TFT_RES, HIGH);
+  digitalWrite(b.tftRes, HIGH);
   delay(120);
 
   spi_bus_config_t bus = {};
-  bus.mosi_io_num = PIN_TFT_SDA;
+  bus.mosi_io_num = b.tftSda;
   bus.miso_io_num = -1;
-  bus.sclk_io_num = PIN_TFT_SCL;
+  bus.sclk_io_num = b.tftScl;
   bus.quadwp_io_num = -1;
   bus.quadhd_io_num = -1;
   bus.max_transfer_sz = CHUNK_PX * 2;
   if (spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO) != ESP_OK) return false;
 
   spi_device_interface_config_t dc = {};
-  dc.clock_speed_hz = TFT_SPI_MHZ * 1000000;
-  dc.mode = TFT_SPI_MODE;
-  dc.spics_io_num = PIN_TFT_CS;
+  dc.clock_speed_hz = b.spiMhz * 1000000;
+  dc.mode = b.spiMode;
+  dc.spics_io_num = b.tftCs;
   dc.queue_size = sizeof(trs) / sizeof(trs[0]);
   dc.pre_cb = preCb;
   if (spi_bus_add_device(SPI2_HOST, &dc, &dev) != ESP_OK) return false;
 
   uint8_t colmod = 0x55;  // 16-bit colour
-  uint8_t madctl = MAD_ST7789[rot] | (TFT_BGR ? 0x08 : 0x00);
+  uint8_t madctl = MAD_ST7789[rot] | (b.bgr ? 0x08 : 0x00);
   cmd(0x01);  // software reset
   delay(150);
   cmd(0x11);  // sleep out
   delay(120);
   cmdData(0x3A, &colmod, 1);
   cmdData(0x36, &madctl, 1);
-  cmd(TFT_INVERT ? 0x21 : 0x20);
+  cmd(b.invert ? 0x21 : 0x20);
   cmd(0x13);  // normal display mode
 
   tileHash = (uint32_t*)heap_caps_calloc(dirtyTileCount(W, H), 4, MALLOC_CAP_INTERNAL);
@@ -261,7 +261,8 @@ void display_backlight(int pct) {
   }
   float u = pct / 100.f;
   int duty = (int)(u * u * 255);
-  if (duty < 6) duty = 6;
+  if (pct <= 0) duty = 0;  // asleep: really dark
+  else if (duty < 6) duty = 6;
   ledcWrite(pinBLK, duty);
 }
 #endif

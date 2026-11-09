@@ -3,6 +3,7 @@
 #include <Preferences.h>
 #include <esp_timer.h>
 
+#include "board.h"
 #include "config.h"
 #include "display.h"
 #include "gfx.h"
@@ -15,6 +16,19 @@ SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 
 static Preferences prefs;
 static bool haveScreen = false;
+static Board board;
+static char boardSig[96];  // the wiring in use, for the PINS answer
+
+// which wiring to use (see board.h): your own build sets it, a release keeps what the board saved
+static Board loadBoard() {
+  Board mine = board_compiled(), saved;
+  bool have = prefs.getBytesLength("board") == sizeof(Board) && prefs.getBytes("board", &saved, sizeof saved) == sizeof saved;
+#ifdef SPIN_RELEASE
+  if (have) return saved;
+#endif
+  if (!have || memcmp(&saved, &mine, sizeof mine) != 0) prefs.putBytes("board", &mine, sizeof mine);
+  return mine;
+}
 
 static MotorConfig toMotor(const Settings& s) {
   return MotorConfig{s.stepsRev, s.micro, s.gear, s.accel, s.dirInv != 0};
@@ -51,6 +65,8 @@ static void hSave(const Settings& s) {
   prefs.putUChar("dark", s.dark);
   prefs.putUChar("home", s.home);
   prefs.putUChar("axoColor", s.axoColor);
+  prefs.putUChar("sleep", s.sleepMin);
+  prefs.putUChar("wizard", s.wizard);
 }
 static float hRpm() { return motor_rpm(); }
 static double hAngle() { return motor_angle(); }
@@ -147,6 +163,9 @@ void setup() {
   s.home = prefs.getUChar("home", HOME_CARD);  // a new key: every board starts with the card, Spinny is opt-in
   if (s.home >= HOME_COUNT) s.home = HOME_CARD;
   s.axoColor = prefs.getUChar("axoColor", 0);
+  s.sleepMin = prefs.getUChar("sleep", 5);
+  // a board that already has settings has been set up: the wizard is for new printers only
+  s.wizard = prefs.getUChar("wizard", prefs.isKey("rpm") ? 1 : 0);
   // flash can hold anything after a bad write or an older firmware: bring every value into range
   if (!(s.rpm >= RPM_MIN && s.rpm <= RPM_MAX)) s.rpm = RPM_DEFAULT;
   if (s.lang > 1) s.lang = 0;
@@ -158,14 +177,18 @@ void setup() {
   s.dirInv = s.dirInv ? 1 : 0;
   s.dark = s.dark ? 1 : 0;
   if (s.axoColor > 5) s.axoColor = 0;
+  if (s.sleepMin != 0 && s.sleepMin != 1 && s.sleepMin != 5 && s.sleepMin != 15 && s.sleepMin != 30) s.sleepMin = 5;
+  s.wizard = s.wizard ? 1 : 0;
 
-  motor_init(toMotor(s), PIN_STEP, PIN_DIR, PIN_EN);
-  input_init();
+  board = loadBoard();
+  board_sig(board, boardSig, sizeof boardSig);
+  motor_init(toMotor(s), board.step, board.dir, board.en);
+  input_init(board);
   lines = xQueueCreate(48, sizeof(Line));
   txq = xQueueCreate(24, sizeof(Line));
-  haveScreen = display_init();
+  haveScreen = display_init(board);
   if (haveScreen) {
-    UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove};
+    UiHal hal{hSend, hSpin, hBright, hSave, hRpm, hAngle, hCfg, hZero, hMove, boardSig};
     ui_init(hal, s, millis());
   }
   // the serial task runs either way: without a screen the Pi still hears why
@@ -230,5 +253,5 @@ void loop() {
   // (a short burst of heavy frames) does not leave a 320x240 screen stuck at 30 for good.
   if (capFps == 60 && workMs > 16.f) capFps = 30;
   else if (capFps == 30 && workMs < 14.f) capFps = 60;
-  ui_stats((t2 - t0) / 1000.f, bytes / 1024.f, (t1 - t0) / 1000.f);
+  ui_stats((t2 - t0) / 1000.f, bytes / 1024.f, (t1 - t0) / 1000.f, capFps);
 }

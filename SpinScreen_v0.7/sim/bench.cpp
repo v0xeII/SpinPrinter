@@ -30,8 +30,10 @@ int main(int argc, char** argv) {
     if (ms % 1000 == 0) ui_line("PING", ms);
     bool key = false;
     if (ms >= 9000 && ms < 12000 && ms % 400 == 0) { ui_key((ms / 400) % 2 ? K_DOWN : K_UP, ms); key = true; }
-    if (ms == 12500) { ui_key(K_DOWN, ms); ui_key(K_DOWN, ms); } if (ms == 12600) ui_key(K_OK, ms);  // Сервис
-    if (ms == 13000) ui_key(K_DOWN, ms); if (ms == 13200) ui_key(K_OK, ms);                         // Мотор
+    if (ms == 12500) { ui_key(K_DOWN, ms); ui_key(K_DOWN, ms); }
+    if (ms == 12600) ui_key(K_OK, ms);  // Настройки
+    if (ms == 13000) ui_key(K_DOWN, ms);  // past the wizard
+    if (ms == 13200) ui_key(K_OK, ms);  // Мотор
     if (ms == 14000) hsp(true, 6);
     if (ms == 19000) { hsp(false, 0); ui_key(K_BACK, ms); ui_key(K_BACK, ms); }
     cur += (tgt - cur) * 0.002f; ang += cur * 6 * 0.001;

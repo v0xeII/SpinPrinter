@@ -20,6 +20,8 @@ struct Settings {
   int dark;       // dim the screen while printing
   int home;       // main page: HOME_CARD (a big PRINT card on top) or HOME_AXO (Spinny at the side)
   int axoColor;   // colour morph (spinny.h MORPH_*)
+  int sleepMin = 5;  // backlight off after this many idle minutes (0 = never)
+  int wizard = 1;    // 0 = the first-setup wizard has not been through yet (shown after the logo)
 };
 
 // What the UI needs from the hardware. main.cpp fills this in; the simulator fakes it.
@@ -33,6 +35,7 @@ struct UiHal {
   void (*motorConfig)(const Settings& s);  // steps / microsteps / ramp / direction changed
   void (*motorZero)();
   void (*motorMove)(double deg, float rpm);  // exact turn ("1 оборот" test)
+  const char* wiring = nullptr;  // the wiring in use ("43,44,..."), kept in the board's flash (board.h)
 };
 
 void ui_init(const UiHal& hal, const Settings& s, uint32_t nowMs);
@@ -41,4 +44,4 @@ void ui_line(const char* line, uint32_t nowMs);  // a text line received from th
 // draw one frame; returns the frame rate it wants next (60 or 30). subMs: fraction of a millisecond,
 // for even motion. The screen is 320x240 (config.h).
 int ui_frame(Canvas& c, uint32_t nowMs, float subMs = 0);
-void ui_stats(float frameMs, float kbPerFrame, float drawMs = -1);  // for the About screen
+void ui_stats(float frameMs, float kbPerFrame, float drawMs = -1, int capFps = 0);  // for System: speed, the board's 60/30 cap

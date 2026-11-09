@@ -1,8 +1,10 @@
 #pragma once
 #include <stdint.h>
 
-// Starts the ST7789 on the pins in config.h. false: no RAM or the SPI did not start.
-bool display_init();
+#include "board.h"
+
+// Starts the ST7789 on the board's pins (board.h). false: no RAM or the SPI did not start.
+bool display_init(const Board& b);
 int display_width();   // 320 (landscape, config.h TFT_ROTATION)
 int display_height();
 uint16_t* display_buffer();  // draw the next frame here

@@ -17,8 +17,8 @@ Any 64-bit Raspberry Pi works: the software and the wiring are the same.
 | Pi 5 | USB-C, 5 V 5 A (27 W) | micro-HDMI (cable or adapter) | any USB-A port |
 | Pi Zero 2 W | micro-USB, 5 V 2.5 A | mini-HDMI (adapter) | USB OTG adapter |
 
-Not supported: the first Pi, Pi 2 and the first Pi Zero (32-bit only, the Zero has one core).
-The faster the Pi, the more images per turn it can keep up with.
+Not supported: the first Raspberry, Pi 2 and the first Pi Zero (32-bit only, the Zero has one core).
+The faster the Raspberry, the more images per turn it can keep up with.
 
 ## 1. Flash the board
 
@@ -46,17 +46,17 @@ press and release **RESET**, release BOOT and try again.
    - a user name and password (remember them)
    - Wi-Fi: network name, password, your country
    - "Services": enable SSH (password)
-4. "Write". Put the card in the Pi, power it and wait 3 minutes.
-5. On the computer open a terminal (Windows: **PowerShell**) and log in to the Pi:
+4. "Write". Put the card in the Raspberry, power it and wait 3 minutes.
+5. On the computer open a terminal (Windows: **PowerShell**) and log in to the Raspberry:
    ```
    ssh user@spinslicer.local
    ```
    Answer `yes` to the "yes/no" question, then type the password (it does not show, that is normal).
-6. One command on the Pi (10–20 minutes, the Pi reboots at the end):
+6. One command on the Raspberry (10–20 minutes, the Raspberry reboots at the end):
    ```bash
    curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash
    ```
-   It installs the printer software, keeps the projector black until a print and gets the Pi ready
+   It installs the printer software, keeps the projector black until a print and gets the Raspberry ready
    for the board. It takes the latest release, the same version the flasher puts on the board.
    Run the same command again any time to update.
 
@@ -66,31 +66,31 @@ With the card in the reader, from the SpinPrinter folder:
 sudo bash SpinPi/make_sd_card.sh
 ```
 It finds the card and asks you to type "yes", wipes it, writes Raspberry Pi OS Lite, asks for your Wi-Fi
-(only you see the password) and sets up SSH login with this computer's key, no password. The Pi
+(only you see the password) and sets up SSH login with this computer's key, no password. The Raspberry
 installs the printer software by itself on the first start: 10–20 minutes, keep it powered meanwhile.
 
 ## 3. Wire it up
 
 ![wiring](wiring.svg)
 
-- **Board ↔ Pi:** a USB cable (the board's USB-C to any Pi USB port).
+- **Board ↔ Raspberry:** a USB cable (the board's USB-C to any Raspberry USB port).
 - **Screen ST7789 2.4":** SCL→43, SDA→44, RES→1, DC→2, CS→3, BLK→4, VCC→3V3 (not 5V!), GND.
 - **Joystick KY-023:** VRx→13, VRy→11, SW→12, +5V→3V3 (not 5V!), GND.
-- **Projector:** HDMI to the Pi.
-- **Pi power:** the supply for your model (table above). A phone charger with a thin cable often gives "Undervoltage".
+- **Projector:** HDMI to the Raspberry.
+- **Raspberry power:** the supply for your model (table above). A phone charger with a thin cable often gives "Undervoltage".
 - **Motor:** TMC2209 driver: STEP→5, DIR→6, EN→7, common GND; the motor has its own 12–24 V supply.
 
 Wire everything with the power off.
 
 ## 4. First print
 
-1. Switch the Pi on. When the printer's screen says **"Pi connected"**, it is ready. (The screen speaks English
-   and Russian: Service → Display → Language.)
+1. Switch the Raspberry on. When the printer's screen says **"Raspberry connected"**, it is ready. (The screen speaks English
+   and Russian: Settings → Display → Language.)
 2. Open `http://spinslicer.local` (or scan the QR code: printer screen → Connect).
-3. **Service → Projector** on the printer's screen: "Grid" and "Centering" to focus and find the vial axis.
+3. **Settings → Projector** on the printer's screen: "Grid" and "Centering" to focus and find the vial axis.
 4. In SpinSlicer: Settings → Printer → **"Connect"**, then on the Print step → **"Print"**. The
    printer's screen asks "Print?": put the vial in and push the joystick right. Or **"To USB stick"**
-   and the stick into the Pi, or drop the `.spin` file on the printer page.
+   and the stick into the Raspberry, or drop the `.spin` file on the printer page.
 5. After the print, answer "Under / Good / Over" on the screen: the printer adjusts the exposure itself.
 
 ## Troubleshooting
@@ -98,9 +98,9 @@ Wire everything with the power off.
 | you see | do this |
 |---|---|
 | black screen after flashing | check the screen's wires (step 3) and that VCC is on 3V3; long wires: try a shorter cable |
-| no "Pi connected" | wait 20 minutes after the first start; check that the USB cable carries data |
+| no "Raspberry connected" | wait 20 minutes after the first start; check that the USB cable carries data |
 | "Undervoltage" on a monitor | the right supply for your model (table above), a short thick cable without adapters |
-| `spinslicer.local` does not open | are the PC and the Pi on the same network? On Windows without Bonjour use the IP from the printer's screen |
-| way B: the Pi did not come up | put the card in a computer: the `bootfs` partition holds a boot diary, `spinprinter-log.txt` |
+| `spinslicer.local` does not open | are the PC and the Raspberry on the same network? On Windows without Bonjour use the IP from the printer's screen |
+| way B: the Raspberry did not come up | put the card in a computer: the `bootfs` partition holds a boot diary, `spinprinter-log.txt` |
 | service log | `ssh pi@spinslicer.local journalctl -u spinpi -n 50` |
-| can the Pi keep up with the frames | `sudo systemctl stop spinpi && sudo /opt/spinpi/spinproj bench --rt --cpu 3` |
+| can the Raspberry keep up with the frames | `sudo systemctl stop spinpi && sudo /opt/spinpi/spinproj bench --rt --cpu 3` |

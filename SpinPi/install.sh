@@ -1,17 +1,19 @@
 #!/bin/bash
 # SpinPi installer for Raspberry Pi OS Lite.
-# Copy the whole SpinPrinter folder to the Pi, then:  bash SpinPi/install.sh
+# Copy the whole SpinPrinter folder to the Raspberry, then:  bash SpinPi/install.sh
 set -e
 cd "$(dirname "$0")"
 echo "== 1/5 packages (ffmpeg, python3-serial, the compiler for SpinProj)"
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends ffmpeg python3-serial gcc make pkg-config libc6-dev liblz4-dev libdrm-dev avahi-daemon
 # the old video player (spinpi.py --engine mpv) is not needed any more:  sudo apt install mpv
+# esptool: the board's firmware can be updated from its screen (Settings → System). Not fatal without it.
+sudo apt-get install -y --no-install-recommends esptool || echo "!! no esptool: the board's firmware can only be flashed from a computer"
 echo "== 2/5 SpinProj (frames by angle)"
 if [ -d ../SpinProj ]; then
   make -C ../SpinProj NO_SDL=1 clean spinproj
 else
-  echo "нет папки SpinProj рядом с SpinPi: скопируй на Pi всю папку SpinPrinter" && exit 1
+  echo "нет папки SpinProj рядом с SpinPi: скопируй на Raspberry всю папку SpinPrinter" && exit 1
 fi
 echo "== 3/5 files -> /opt/spinpi"
 sudo mkdir -p /opt/spinpi /var/lib/spinpi

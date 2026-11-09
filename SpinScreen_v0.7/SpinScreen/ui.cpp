@@ -19,6 +19,19 @@
 #include "lang.h"
 #include "qrcodegen.h"
 #include "spinny.h"
+#include "board.h"
+
+// this board's wiring, as text. The Raspberry asks for it (PINS) and finds the same string inside a
+// firmware file: it only offers an update built for these very pins (a release built for the stock
+// wiring would leave a board with other pins without a picture).
+#define SS_(x) #x
+#define SS(x) SS_(x)
+static const char PIN_SIG[] = "SPINPINS " SS(PIN_TFT_SCL) "," SS(PIN_TFT_SDA) "," SS(PIN_TFT_RES) "," SS(PIN_TFT_DC) ","
+    SS(PIN_TFT_CS) "," SS(PIN_TFT_BLK) "," SS(TFT_ROTATION) "," SS(TFT_SPI_MHZ) "," SS(TFT_SPI_MODE) "," SS(TFT_INVERT) ","
+    SS(TFT_BGR) "," SS(PIN_JOY_X) "," SS(PIN_JOY_Y) "," SS(PIN_JOY_SW) "," SS(JOY_SWAP_XY) "," SS(JOY_INVERT_Y) ","
+    SS(JOY_INVERT_X) "," SS(PIN_STEP) "," SS(PIN_DIR) "," SS(PIN_EN);
+// release = takes the wiring the board saved (any board can get it over the air); local = sets it
+static const char BUILD_TAG[] = "SPINBUILD " SPIN_BUILD;
 #include "logo.h"
 
 using namespace pal;
@@ -49,46 +62,56 @@ static float easeOut(float x) {
 // ================================================================ menu model
 enum ItemId {
   I_PRINT, I_CONNECT, I_SETTINGS,
-  I_ABOUT,
   I_P_BLACK, I_P_WHITE, I_P_GRID, I_P_FOCUS, I_P_CIRCLE, I_P_CENTER, I_P_VIAL,
   I_ROT, I_SPEED, I_DIR, I_ACCEL, I_MICRO, I_STEPS, I_GEAR, I_ONEREV, I_ZERO,
   I_BRIGHT, I_LANG, I_DARK,
   I_REBOOT, I_POWEROFF,
   I_AXO_SHOW, I_AXO_COLOR,
   I_SU_TURNS, I_SU_FACTOR, I_SU_DELAY,  // print setup rows
-  I_G_SPIN, I_G_DISPLAY, I_G_PROJ, I_G_MOTOR, I_G_SYSTEM,  // the sub-menus of Settings
+  I_G_MOTOR, I_G_DISPLAY, I_G_PROJ, I_G_SYSTEM, I_G_WIZARD,  // the sub-menus of Settings (+ the wizard)
+  // System: facts, not buttons (keep them together: infoRow() is a range)
+  I_INF_VER, I_INF_RASP, I_INF_NET, I_INF_SPACE, I_INF_PRINTS, I_INF_PROJ, I_INF_BOARD,
+  I_FWUP, I_SLEEP, I_UPD,
   I_FILE,                          // a video in the list
+  I_NONE,                          // past the end of a page
 };
 static const Str ITEM_NAME[] = {
     S_PRINT, S_CONNECT, S_SERVICE,
-    S_ABOUT,
     S_P_BLACK, S_P_WHITE, S_P_GRID, S_P_FOCUS, S_P_CIRCLE, S_P_CENTER, S_P_VIAL,
     S_ROTATION, S_SPEED, S_DIRECTION, S_ACCEL, S_MICROSTEP, S_STEPS_REV, S_GEAR, S_ONEREV, S_ZERO,
     S_BRIGHT, S_LANG, S_DARK,
     S_REBOOT, S_POWEROFF,
     S_AXO_SHOW, S_AXO_COLOR,
     S_SU_TURNS, S_SU_FACTOR, S_SU_DELAY,
-    S_G_SPIN, S_G_DISPLAY, S_G_PROJ, S_G_MOTOR, S_G_SYSTEM,
+    S_G_MOTOR, S_G_DISPLAY, S_G_PROJ, S_G_SYSTEM, S_G_WIZARD,
+    S_VERSION, S_PI, S_NET, S_SPACE, S_PRINTS, S_PROJECTOR, S_BOARD,
+    S_FWUP, S_SLEEP, S_UPD_CHECK,
     S_FILES,
+    S_BACK,
 };
-enum PageId { PG_MAIN, PG_SETTINGS, PG_SPIN, PG_DISPLAY, PG_PROJ, PG_MOTOR, PG_SYSTEM, PG_FILES };
+enum PageId { PG_MAIN, PG_SETTINGS, PG_MOTOR, PG_DISPLAY, PG_PROJ, PG_SYSTEM, PG_FILES };
 static const ItemId MAIN_ITEMS[] = {I_PRINT, I_CONNECT, I_SETTINGS};
 // Settings is a short list of groups; every group is its own page (back = tilt left / long press)
-static const ItemId SETTINGS_ITEMS[] = {I_G_SPIN, I_G_DISPLAY, I_G_PROJ, I_G_MOTOR, I_G_SYSTEM};
-static const ItemId SPIN_ITEMS[] = {I_ROT, I_SPEED, I_DIR};
-static const ItemId DISPLAY_ITEMS[] = {I_BRIGHT, I_LANG, I_DARK, I_AXO_SHOW, I_AXO_COLOR};
+// the wizard first: it walks through all the rest
+static const ItemId SETTINGS_ITEMS[] = {I_G_WIZARD, I_G_MOTOR, I_G_PROJ, I_G_DISPLAY, I_G_SYSTEM};
+// rotation and the motor's own settings are one page: the everyday rows first
+static const ItemId MOTOR_ITEMS[] = {I_ROT, I_SPEED, I_DIR, I_ACCEL, I_MICRO, I_STEPS, I_GEAR, I_ONEREV, I_ZERO};
+static const ItemId DISPLAY_ITEMS[] = {I_BRIGHT, I_LANG, I_DARK, I_SLEEP, I_AXO_SHOW, I_AXO_COLOR};
 static const ItemId PROJ_ITEMS[] = {I_P_BLACK, I_P_WHITE, I_P_GRID, I_P_FOCUS, I_P_CIRCLE, I_P_CENTER, I_P_VIAL};
-static const ItemId MOTOR_ITEMS[] = {I_ACCEL, I_MICRO, I_STEPS, I_GEAR, I_ONEREV, I_ZERO};
-static const ItemId SYSTEM_ITEMS[] = {I_REBOOT, I_POWEROFF, I_ABOUT};
+// System shows what the printer is at once (short rows, skipped by the pill), then the buttons.
+// "Update firmware" is there only while the Raspberry offers one (FW line).
+static const ItemId SYSTEM_ITEMS[] = {I_INF_VER,   I_INF_RASP, I_INF_NET, I_INF_SPACE, I_INF_PRINTS,
+                                      I_INF_PROJ,  I_INF_BOARD, I_UPD,    I_FWUP,      I_REBOOT,    I_POWEROFF};
 struct PageDef { const ItemId* items; int n; };
 #define PG_N(a) ((int)(sizeof(a) / sizeof((a)[0])))
-static const PageDef PAGES[] = {{MAIN_ITEMS, PG_N(MAIN_ITEMS)},       {SETTINGS_ITEMS, PG_N(SETTINGS_ITEMS)},
-                                {SPIN_ITEMS, PG_N(SPIN_ITEMS)},       {DISPLAY_ITEMS, PG_N(DISPLAY_ITEMS)},
-                                {PROJ_ITEMS, PG_N(PROJ_ITEMS)},       {MOTOR_ITEMS, PG_N(MOTOR_ITEMS)},
-                                {SYSTEM_ITEMS, PG_N(SYSTEM_ITEMS)},   {nullptr, 0}};
+static const PageDef PAGES[] = {{MAIN_ITEMS, PG_N(MAIN_ITEMS)},     {SETTINGS_ITEMS, PG_N(SETTINGS_ITEMS)},
+                                {MOTOR_ITEMS, PG_N(MOTOR_ITEMS)},   {DISPLAY_ITEMS, PG_N(DISPLAY_ITEMS)},
+                                {PROJ_ITEMS, PG_N(PROJ_ITEMS)},     {SYSTEM_ITEMS, PG_N(SYSTEM_ITEMS)},
+                                {nullptr, 0}};
 static const Str MORPH_NAME[MORPH_COUNT] = {S_C_PINK, S_C_GOLD, S_C_WILD, S_C_BLACK, S_C_BLUE, S_C_RGB};
 static const int MICRO_OPTS[] = {1, 2, 4, 8, 16, 32, 64, 128, 256};
 static const int STEPS_OPTS[] = {200, 400};
+static const int SLEEP_OPTS[] = {0, 1, 5, 15, 30};  // minutes; 0 = never
 
 struct PageView {
   int page = PG_MAIN, sel = 0;
@@ -97,7 +120,7 @@ struct PageView {
 };
 
 // ================================================================ state
-enum ScreenId { SC_BOOT, SC_MENU, SC_SETUP, SC_PRINT, SC_DONE, SC_ABOUT, SC_CONNECT, SC_ASK };
+enum ScreenId { SC_BOOT, SC_MENU, SC_SETUP, SC_PRINT, SC_DONE, SC_CONNECT, SC_ASK, SC_WIZ };
 
 static UiHal H;
 static Settings S;
@@ -112,7 +135,7 @@ static int navDir = 0;
 
 static bool projLit = false;  // a test pattern may be on the projector
 static bool editing = false;
-static ItemId editItem = I_ABOUT;
+static ItemId editItem = I_SPEED;
 static Spring edit;
 static Spring bump;
 static int bumpDir = 0;
@@ -178,6 +201,46 @@ static char askName[64] = "";
 static int askTurns = 0, askSec = 0;
 static bool askSent = false;
 
+// what the Raspberry tells about itself (SYS line, every ~10 s); -1 / "" = not known
+static char sysIp[24] = "";
+static int sysWifi = -1;     // signal %, -1 = no Wi-Fi (cable or unknown)
+static float sysTemp = -1;   // CPU °C
+static float sysSd = -1, sysUsb = -1;  // free GB
+static int sysPrints = -1;
+static float sysProjH = -1;  // hours the projector was on (HDMI connected)
+static int sysHdmi = -1;     // the projector on HDMI: 1 / 0, -1 = not known
+static bool sysSeen = false;  // a SYS line came: the Raspberry runs a SpinPi that sends one
+static float piSince = -100;  // when the link to the Raspberry came up
+// a firmware the Raspberry can put on this board (FW <version> <source>), and the update itself
+static char fwVer[16] = "", fwSrc[8] = "";
+static bool fwFlashing = false;
+// updates over the air: the Raspberry asks GitHub (EV UPDCHECK) and puts the release on itself and
+// on this board (EV UPDATE)
+enum { UPD_IDLE, UPD_CHECKING, UPD_NONE, UPD_AVAIL, UPD_ERR };
+static int updState = UPD_IDLE;
+static char updVer[16] = "";
+static float updT = -100;     // when the check was asked
+static bool updRun = false;   // the Raspberry is updating itself (it restarts on the way)
+static float updRunT = 0;
+
+// first-setup wizard: language, focus, centering, vial width, test spin, done
+// first-setup wizard: language, the links, the projector (focus, centering, vial), the motor
+// (direction, one exact turn, print speed), the screen, then a summary
+enum { WZ_HELLO, WZ_LINK, WZ_FOCUS, WZ_CENTER, WZ_VIAL, WZ_DIR, WZ_TURN, WZ_SPEED, WZ_SCREEN, WZ_DONE, WZ_COUNT };
+static int wizStep = 0;
+static float wizT = 0;  // when the step began
+static int wizPat = 0;  // focus picture: target / grid / circle
+static const char* const WIZ_PAT[3] = {"focus", "grid", "circle"};
+
+static bool asleep = false;  // backlight off after S.sleepMin idle minutes
+
+// the part's silhouette (SHAPE lines, from the .spin preview): 1 bit a pixel, rows of (w+7)/8 bytes.
+// The print screen shows it inside the progress ring, lighting up as the dose builds.
+static const int SHAPE_MAX = 64;
+static uint8_t shapeBits[SHAPE_MAX * SHAPE_MAX / 8];
+static int shapeW = 0, shapeH = 0;
+static bool shapeOk = false;
+
 struct Particle { float x, y, vx, vy, r; uint16_t c; };
 static Particle conf[48];
 
@@ -230,12 +293,15 @@ static float frand(float a, float b) {
   return a + (b - a) * ((rnd >> 8) & 0xFFFF) / 65535.f;
 }
 static float renderMs = 0, pushKB = 0, drawMsAvg = 0;
+static int capFps = 60;  // what the board manages: 60, or 30 if a frame takes longer than ~16 ms
 
 static const char* T(Str s) { return STR[S.lang][s]; }
 
 // the hints about the controls are in lang.h: the joystick (↑↓, → = OK, ← = back)
 #define HT T
 static bool piOk() { return everRx && (now - lastRx) * 1000.f < PI_TIMEOUT_MS; }
+// a Raspberry that has been there a while without one SYS line runs an older SpinPi
+static bool oldSpinPi() { return piOk() && !sysSeen && now - piSince > 15; }
 
 static void say(const char* txt, float secs = 1.8f) {
   strncpy(toastText, txt, sizeof(toastText) - 1);
@@ -281,8 +347,8 @@ static void go(ScreenId s) {
     stopAskT = -10;
     syncMs = -1;
     drops = 0;
-    if (S.dark) H.brightness(10);
-  } else if (prev == SC_PRINT) {
+    if (S.dark && !asleep) H.brightness(10);
+  } else if (prev == SC_PRINT && !asleep) {
     H.brightness(S.bright);
   }
   if (s == SC_SETUP) { suSel = 3; suPill.snap(3); }
@@ -316,6 +382,11 @@ static float angleNow() {
 static void fitText(const Font& f, const char* src, char* dst, size_t n, int maxW) {
   strncpy(dst, src, n - 1);
   dst[n - 1] = 0;
+  if (strlen(src) > n - 1) {  // cut by the buffer: never in the middle of a letter
+    size_t len = n - 1;
+    while (len > 0 && ((uint8_t)dst[len] & 0xC0) == 0x80) len--;
+    dst[len] = 0;
+  }
   if (Canvas::textWidth(f, dst) <= maxW) return;
   size_t len = strlen(dst);
   while (len > 0) {
@@ -326,6 +397,56 @@ static void fitText(const Font& f, const char* src, char* dst, size_t n, int max
   }
 }
 
+// a paragraph in lines of at most w pixels (broken at spaces); returns the y below it
+static int wrapText(Canvas& c, const Font& f, int x, int y, int w, int lh, const char* src, uint16_t col, float a,
+                    int maxLines = 3) {
+  char line[232], word[64];
+  line[0] = 0;
+  int lines = 0;
+  const char* p = src;
+  while (*p && lines < maxLines) {
+    while (*p == ' ') p++;
+    size_t k = 0;
+    while (p[k] && p[k] != ' ' && k < sizeof word - 1) k++;
+    memcpy(word, p, k);
+    word[k] = 0;
+    p += k;
+    char next[300];
+    snprintf(next, sizeof next, "%s%s%s", line, line[0] ? " " : "", word);
+    if (line[0] && Canvas::textWidth(f, next) > w) {  // the word goes to the next line
+      if (lines == maxLines - 1) {  // the last line: put what is left on it, cut
+        char rest[400], fit[96];
+        snprintf(rest, sizeof rest, "%s %s%s", line, word, p);
+        fitText(f, rest, fit, sizeof fit, w);
+        c.text(f, x, y, fit, col, a);
+        return y + lh;
+      }
+      c.text(f, x, y, line, col, a);
+      y += lh;
+      lines++;
+      snprintf(line, sizeof line, "%s", word);
+    } else {
+      strncpy(line, next, sizeof line - 1);
+      line[sizeof line - 1] = 0;
+    }
+  }
+  if (line[0] && lines < maxLines) {
+    char fit[96];
+    fitText(f, line, fit, sizeof fit, w);
+    c.text(f, x, y, fit, col, a);
+    y += lh;
+  }
+  return y;
+}
+
+// 7.1 / 12 (Russian: 7,1): one decimal below 10, none above
+static void fmtNum(char* b, size_t n, float v) {
+  if (v >= 9.95f) snprintf(b, n, "%.0f", (double)v);
+  else snprintf(b, n, "%.1f", (double)v);
+  if (S.lang == 0)
+    for (char* p = b; *p; p++)
+      if (*p == '.') *p = ',';
+}
 static void itemValue(ItemId it, char* b, size_t n) {
   char r[16];
   switch (it) {
@@ -346,6 +467,56 @@ static void itemValue(ItemId it, char* b, size_t n) {
     case I_DARK: snprintf(b, n, "%s", S.dark ? T(S_ON) : T(S_OFF)); break;
     case I_AXO_SHOW: snprintf(b, n, "%s", T(S.home == HOME_AXO ? S_HOME_AXO : S_HOME_CARD)); break;
     case I_AXO_COLOR: snprintf(b, n, "%s", T(MORPH_NAME[S.axoColor % MORPH_COUNT])); break;
+    case I_INF_VER:
+      if (fwVer[0]) snprintf(b, n, "%s → %s", FW_VERSION, fwVer);
+      else snprintf(b, n, "%s", FW_VERSION);
+      break;
+    case I_INF_RASP:
+      if (!piOk()) snprintf(b, n, "%s", T(S_NOT_CONNECTED));
+      else if (oldSpinPi()) snprintf(b, n, "%s · %s", T(S_CONNECTED), T(S_RASP_OLD));
+      else if (sysTemp >= 0) snprintf(b, n, "%s · %.0f °C", T(S_CONNECTED), (double)sysTemp);
+      else snprintf(b, n, "%s", T(S_CONNECTED));
+      break;
+    case I_INF_NET:
+      if (!piOk() || !sysIp[0]) snprintf(b, n, "—");
+      else if (sysWifi >= 0) snprintf(b, n, "%s · Wi-Fi %d%%", sysIp, sysWifi);
+      else snprintf(b, n, "%s", sysIp);
+      break;
+    case I_INF_SPACE: {
+      char a[16], u[16];
+      if (sysSd < 0) { snprintf(b, n, "—"); break; }
+      fmtNum(a, sizeof a, sysSd);
+      if (sysUsb < 0) { snprintf(b, n, "SD %s %s", a, T(S_GB)); break; }
+      fmtNum(u, sizeof u, sysUsb);
+      snprintf(b, n, "SD %s · USB %s %s", a, u, T(S_GB));
+      break;
+    }
+    case I_INF_PRINTS:
+      if (sysPrints >= 0) snprintf(b, n, "%d", sysPrints);
+      else snprintf(b, n, "—");
+      break;
+    case I_INF_PROJ:
+      if (sysHdmi == 0) snprintf(b, n, "%s", T(S_NOT_CONNECTED_M));
+      else if (sysProjH >= 0) { fmtNum(r, sizeof r, sysProjH); snprintf(b, n, "%s %s", r, T(S_HOURS)); }
+      else snprintf(b, n, "—");
+      break;
+    // how long the board has been on, and its frame rate (people porting to other boards look here)
+    case I_INF_BOARD:  // what the board can draw (a still screen runs at a calm 30 on purpose)
+      fmtTime(r, sizeof r, (int)now);
+      snprintf(b, n, "%s · %d fps · %.0f ms", r, capFps, (double)renderMs);
+      break;
+    case I_FWUP: snprintf(b, n, "%s", fwVer); break;
+    case I_UPD:
+      if (updState == UPD_CHECKING) snprintf(b, n, "…");
+      else if (updState == UPD_NONE) snprintf(b, n, "%s", T(S_UPD_NONE));
+      else if (updState == UPD_AVAIL) snprintf(b, n, "%s", updVer);
+      else if (updState == UPD_ERR) snprintf(b, n, "%s", T(S_UPD_ERR));
+      else b[0] = 0;
+      break;
+    case I_SLEEP:
+      if (S.sleepMin > 0) snprintf(b, n, "%d %s", S.sleepMin, T(S_MIN));
+      else snprintf(b, n, "%s", T(S_OFF));
+      break;
     case I_P_BLACK: case I_P_WHITE: case I_P_GRID: case I_P_FOCUS: case I_P_CIRCLE:
     case I_ONEREV: case I_REBOOT: case I_POWEROFF: b[0] = 0; break;
     default: snprintf(b, n, "→"); break;
@@ -358,9 +529,45 @@ static bool editable(ItemId it) {
     default: return false;
   }
 }
-static int pageCount(const PageView& p) { return p.page == PG_FILES ? (nFiles > 0 ? nFiles : 1) : PAGES[p.page].n; }
-static ItemId itemAt(const PageView& p, int i) { return p.page == PG_FILES ? I_FILE : PAGES[p.page].items[i]; }
+// info rows (System) are shown, not chosen: the pill steps over them
+static bool infoRow(ItemId it) { return it >= I_INF_VER && it <= I_INF_BOARD; }
+// their pitch: short rows, so all of System (facts + updates + reboot + shut down) fits on the screen.
+// (A firmware on a USB stick adds one more button: then the list scrolls a little.)
+static int infoH() { return 17; }
+// rows that are on a page only some of the time
+static bool hiddenRow(ItemId it) { return it == I_FWUP && !fwVer[0]; }
+static int pageCount(const PageView& p) {
+  if (p.page == PG_FILES) return nFiles > 0 ? nFiles : 1;
+  int n = 0;
+  for (int i = 0; i < PAGES[p.page].n; i++) n += !hiddenRow(PAGES[p.page].items[i]);
+  return n;
+}
+static ItemId itemAt(const PageView& p, int i) {
+  if (p.page == PG_FILES) return I_FILE;
+  for (int j = 0; j < PAGES[p.page].n; j++) {
+    ItemId it = PAGES[p.page].items[j];
+    if (hiddenRow(it)) continue;
+    if (i-- == 0) return it;
+  }
+  return I_NONE;
+}
 static ItemId curItem() { return itemAt(pv, pv.sel); }
+// row geometry: rows are ROW_H high except the info rows. rowEdge = top edge of row i from the
+// first row's top; rowPos = its centre, counted like i * ROW_H (the pill and the list use that)
+static float rowHt(const PageView& p, int i) { return p.page != PG_FILES && infoRow(itemAt(p, i)) ? infoH() : ROW_H; }
+static float rowEdge(const PageView& p, int i) {
+  float e = 0;
+  for (int j = 0; j < i; j++) e += rowHt(p, j);
+  return e;
+}
+static float rowPos(const PageView& p, int i) { return rowEdge(p, i) + rowHt(p, i) / 2 - ROW_H / 2.f; }
+static float pageHt(const PageView& p) { return rowEdge(p, pageCount(p)); }
+// the next row the pill may stop on, from sel in direction d; -1 = none
+static int nextSel(const PageView& p, int sel, int d) {
+  for (int i = sel + d; i >= 0 && i < pageCount(p); i += d)
+    if (!infoRow(itemAt(p, i))) return i;
+  return -1;
+}
 
 // ================================================================ actions
 // the driver is not reconfigured under a spinning motor: the change waits for the stop
@@ -384,6 +591,11 @@ static void pushPage(int page) {
   depth++;
   pv = PageView();
   pv.page = page;
+  if (page != PG_FILES && infoRow(itemAt(pv, 0))) {  // start on the first button, below the facts
+    int f = nextSel(pv, 0, 1);
+    pv.sel = f < 0 ? 0 : f;
+    pv.pill.snap(rowPos(pv, pv.sel));
+  }
   nav.v = 0; nav.target = 1; navDir = 1;
   if (page == PG_FILES) { nFiles = 0; listing = true; listAskedT = now; H.send("EV LIST"); }
 }
@@ -395,7 +607,7 @@ static void popPage() {
   pv = PageView();
   pv.page = stackPage[depth];
   pv.sel = stackSel[depth];
-  pv.pill.snap(pv.sel * ROW_H);
+  pv.pill.snap(rowPos(pv, pv.sel));
   pv.scroll.v = pv.scroll.target = pv.sel >= VISIBLE ? (pv.sel - VISIBLE + 1) * ROW_H : 0;
   nav.v = 0; nav.target = 1; navDir = -1;
 }
@@ -528,6 +740,80 @@ static void openSetup(int i) {
   go(SC_SETUP);
 }
 
+// ---- the first-setup wizard
+static bool wizMotorStep(int st) { return st == WZ_DIR || st == WZ_TURN || st == WZ_SPEED; }
+static bool wizNeedsPi(int st) { return st == WZ_FOCUS || st == WZ_CENTER || st == WZ_VIAL; }
+static void wizEnter(int st) {
+  wizStep = st;
+  wizT = now;
+  hop();
+  // the projector shows what this step is about, and is dark otherwise
+  if (st == WZ_FOCUS) { sendf("EV PATTERN %s", WIZ_PAT[wizPat]); projLit = true; }
+  else if (st == WZ_CENTER) { H.send("EV PATTERN center"); projLit = true; }
+  else if (st == WZ_VIAL) { H.send("EV PATTERN vial"); projLit = true; }
+  else if (projLit) { H.send("EV PATTERN black"); projLit = false; }
+  // the motor: turning on the direction and speed steps, one exact turn on its own step
+  if (st == WZ_DIR || st == WZ_SPEED) { if (!motorOn) setMotor(true); }
+  else if (motorOn) setMotor(false);
+  if (st == WZ_TURN) { H.motorZero(); H.motorMove(360, S.rpm); }
+}
+static void startWizard() {
+  go(SC_WIZ);
+  wizEnter(WZ_HELLO);
+}
+static void endWizard() {
+  if (motorOn) setMotor(false);
+  if (projLit) { H.send("EV PATTERN black"); projLit = false; }
+  S.wizard = 1;
+  H.save(S);
+  char r[16];
+  fmt2(r, sizeof r, S.rpm);
+  sendf("EV RPM %s", r);
+  go(SC_MENU);
+}
+static void wizKey(Key k) {
+  if (k == K_OK) {
+    H.save(S);
+    if (wizStep == WZ_DONE) { endWizard(); mood(MOOD_HAPPY, 2); return; }
+    wizEnter(wizStep + 1);
+  } else if (k == K_BACK) {
+    if (wizStep == WZ_HELLO) endWizard();  // ← on the first step: skip it all (Settings has it again)
+    else wizEnter(wizStep - 1);
+  } else {
+    int d = k == K_UP ? 1 : -1;
+    bool pi = piOk();
+    switch (wizStep) {
+      case WZ_HELLO: S.lang = 1 - S.lang; hop(); break;
+      case WZ_FOCUS:
+        if (!pi) { hop(-2); break; }
+        wizPat = (wizPat + (d > 0 ? 1 : 2)) % 3;
+        sendf("EV PATTERN %s", WIZ_PAT[wizPat]);
+        hop();
+        break;
+      case WZ_CENTER: if (pi) changeValue(I_P_CENTER, d); else hop(-2); break;
+      case WZ_VIAL: if (pi) changeValue(I_P_VIAL, d); else hop(-2); break;
+      case WZ_DIR:  // stop, turn the other way, start again (the driver is not reconfigured while turning)
+        setMotor(false);
+        S.dirInv = !S.dirInv;
+        H.motorConfig(S);
+        setMotor(true);
+        hop();
+        break;
+      case WZ_TURN:
+        if (k == K_UP) { H.motorZero(); H.motorMove(360, S.rpm); hop(); }
+        else hop(-2);
+        break;
+      case WZ_SPEED: changeValue(I_SPEED, d); break;
+      case WZ_SCREEN: changeValue(I_BRIGHT, d); break;
+      default: hop(-2); break;
+    }
+  }
+}
+static void afterBoot() {
+  if (!S.wizard) startWizard();
+  else go(SC_MENU);
+}
+
 static void activate() {
   ItemId it = curItem();
   hop();
@@ -539,11 +825,30 @@ static void activate() {
     case I_FILE: if (nFiles > 0) openSetup(pv.sel); break;
     case I_CONNECT: go(SC_CONNECT); break;
     case I_SETTINGS: pushPage(PG_SETTINGS); break;
-    case I_G_SPIN: pushPage(PG_SPIN); break;
     case I_G_DISPLAY: pushPage(PG_DISPLAY); break;
     case I_G_PROJ: pushPage(PG_PROJ); break;
     case I_G_MOTOR: pushPage(PG_MOTOR); break;
     case I_G_SYSTEM: pushPage(PG_SYSTEM); break;
+    case I_G_WIZARD: startWizard(); break;
+    case I_SLEEP: {
+      int i = (indexOf(SLEEP_OPTS, 5, S.sleepMin) + 1) % 5;
+      S.sleepMin = SLEEP_OPTS[i];
+      H.save(S);
+      say(T(S_SAVED), 1.2f);
+      break;
+    }
+    case I_FWUP: confirmItem = it; confirm.target = 1; break;
+    case I_UPD:
+      if (updState == UPD_AVAIL) { confirmItem = it; confirm.target = 1; }
+      else if (!piOk()) { say(T(S_NEED_PI)); mood(MOOD_SAD, 1.8f); }
+      else if (oldSpinPi()) { updState = UPD_ERR; say(T(S_RASP_OLD), 4); mood(MOOD_SAD, 2); }
+      else if (updState != UPD_CHECKING) {
+        updState = UPD_CHECKING;
+        updT = now;
+        H.send("EV UPDCHECK");
+        say(T(S_UPD_ASK), 60);  // stays until the answer
+      }
+      break;
     case I_AXO_SHOW: S.home = (S.home + 1) % HOME_COUNT; H.save(S); say(T(S_SAVED), 1.2f); break;
     case I_AXO_COLOR:
       S.axoColor = (S.axoColor + 1) % MORPH_COUNT;
@@ -551,7 +856,6 @@ static void activate() {
       H.save(S);
       mood(MOOD_HAPPY, 0.8f);
       break;
-    case I_ABOUT: go(SC_ABOUT); break;
     case I_P_BLACK: H.send("EV PATTERN black"); projLit = true; break;
     case I_P_WHITE: H.send("EV PATTERN white"); projLit = true; break;
     case I_P_GRID: H.send("EV PATTERN grid"); projLit = true; break;
@@ -601,12 +905,15 @@ void ui_key(Key k, uint32_t nowMs) {
   lastKeyT = now;
   lastInput = now;
   if (k == K_NONE) return;
-  if (screen == SC_BOOT) { go(SC_MENU); return; }
+  if (fwFlashing || updRun) return;  // the Raspberry is writing a new firmware / updating itself
+  if (asleep) { asleep = false; H.brightness(S.bright); return; }  // the first touch only wakes the screen
+  if (screen == SC_BOOT) { afterBoot(); return; }
   if (wasSleepy && screen == SC_MENU) { mood(MOOD_HAPPY, 0.8f); hop(); return; }
 
   if (confirm.target > 0) {  // "Точно?" dialog
     if (k == K_OK) {
-      H.send(confirmItem == I_REBOOT ? "EV REBOOT" : "EV POWEROFF");
+      if (confirmItem == I_UPD) H.send("EV UPDATE");
+      else H.send(confirmItem == I_FWUP ? "EV FWUPDATE" : (confirmItem == I_REBOOT ? "EV REBOOT" : "EV POWEROFF"));
       say(T(S_SENT));
     }
     if (k == K_OK || k == K_BACK) confirm.target = 0;
@@ -624,8 +931,8 @@ void ui_key(Key k, uint32_t nowMs) {
       if (nav.v < 0.6f && nav.target == 1) break;  // ignore keys mid-slide
       if (k == K_UP || k == K_DOWN) {
         int d = k == K_DOWN ? 1 : -1;
-        int n = pv.sel + d;
-        if (n < 0 || n >= pageCount(pv)) { pv.pill.vel += d * 140; B.kickY -= d * 6; break; }
+        int n = nextSel(pv, pv.sel, d);
+        if (n < 0) { pv.pill.vel += d * 140; B.kickY -= d * 6; break; }
         pv.sel = n;
         B.kickY += d * 14;  // a little dive / climb with the selection
       } else if (k == K_OK) {
@@ -678,7 +985,8 @@ void ui_key(Key k, uint32_t nowMs) {
         go(SC_MENU);
       }
       break;
-    case SC_ABOUT: case SC_CONNECT: if (k == K_OK || k == K_BACK) go(SC_MENU); break;
+    case SC_CONNECT: if (k == K_OK || k == K_BACK) go(SC_MENU); break;
+    case SC_WIZ: wizKey(k); break;
     default: break;
   }
 }
@@ -690,11 +998,94 @@ static void copyArg(char* dst, size_t n, const char* src) {
 
 void ui_line(const char* line, uint32_t nowMs) {
   now = (nowMs - bootMs) / 1000.f;
+  if (!piOk()) piSince = now;  // the link comes up (again)
   lastRx = now;
   if (!everRx) { everRx = true; say(T(S_PI_HELLO)); }
   char b[112];
+  // lines that want the screen: count as activity, so a sleeping screen wakes up for them
+  if (!strncmp(line, "MSG ", 4) || !strncmp(line, "ASK ", 4) || !strncmp(line, "STATE ", 6) ||
+      !strncmp(line, "FWUP", 4) || !strncmp(line, "UPD ", 4))
+    lastInput = now;
   if (!strcmp(line, "PING")) {
     H.send("PONG SpinScreen " FW_VERSION);
+  } else if (!strcmp(line, "PINS")) {  // the wiring in use; "nvs" = the board keeps it (board.h)
+    if (H.wiring) { snprintf(b, sizeof b, "SPINPINS %s nvs", H.wiring); H.send(b); }
+    else H.send(PIN_SIG);
+    H.send(BUILD_TAG);
+    return;
+  } else if (!strncmp(line, "SYS ", 4)) {  // SYS ip=.. wifi=.. temp=.. sd=.. usb=.. prints=.. proj=..  (- = unknown)
+    char tmp[160];
+    copyArg(tmp, sizeof tmp, line + 4);
+    for (char* t = strtok(tmp, " "); t; t = strtok(nullptr, " ")) {
+      char* v = strchr(t, '=');
+      if (!v) continue;
+      *v++ = 0;
+      bool none = !strcmp(v, "-");
+      if (!strcmp(t, "ip")) copyArg(sysIp, sizeof sysIp, none ? "" : v);
+      else if (!strcmp(t, "wifi")) sysWifi = none ? -1 : atoi(v);
+      else if (!strcmp(t, "temp")) sysTemp = none ? -1 : (float)atof(v);
+      else if (!strcmp(t, "sd")) sysSd = none ? -1 : (float)atof(v);
+      else if (!strcmp(t, "usb")) sysUsb = none ? -1 : (float)atof(v);
+      else if (!strcmp(t, "prints")) sysPrints = none ? -1 : atoi(v);
+      else if (!strcmp(t, "proj")) sysProjH = none ? -1 : (float)atof(v);
+      else if (!strcmp(t, "hdmi")) sysHdmi = none ? -1 : atoi(v);
+    }
+    sysSeen = true;
+    return;
+  } else if (!strncmp(line, "SHAPE ", 6)) {  // SHAPE BEGIN w h · SHAPE <row> <hex of 8 rows> · SHAPE END · SHAPE -
+    const char* a = line + 6;
+    if (!strncmp(a, "BEGIN ", 6)) {
+      int w = 0, h = 0;
+      sscanf(a + 6, "%d %d", &w, &h);
+      shapeOk = false;
+      memset(shapeBits, 0, sizeof shapeBits);
+      shapeW = (w > 0 && w <= SHAPE_MAX) ? w : 0;
+      shapeH = (h > 0 && h <= SHAPE_MAX) ? h : 0;
+    } else if (!strncmp(a, "END", 3)) {
+      shapeOk = shapeW > 0 && shapeH > 0;
+    } else if (a[0] == '-') {
+      shapeOk = false;
+    } else if (shapeW > 0) {
+      int y = atoi(a);
+      const char* hx = strchr(a, ' ');
+      int bpr = (shapeW + 7) / 8;
+      if (hx && y >= 0 && y < shapeH) {
+        hx++;
+        for (int i = 0; hx[0] && hx[1] && y * bpr + i < shapeH * bpr; i++, hx += 2) {
+          char two[3] = {hx[0], hx[1], 0};
+          shapeBits[y * bpr + i] = (uint8_t)strtol(two, nullptr, 16);
+        }
+      }
+    }
+    return;
+  } else if (!strncmp(line, "FW ", 3)) {  // FW <version> <usb|release> = an update is there · FW - = none
+    fwVer[0] = fwSrc[0] = 0;
+    if (strcmp(line + 3, "-")) sscanf(line + 3, "%15s %7s", fwVer, fwSrc);
+    return;
+  } else if (!strncmp(line, "UPD ", 4)) {  // CHECKING · NONE · AVAIL <ver> · ERR <text> · RUN pi · IDLE
+    const char* a = line + 4;
+    updRun = false;
+    if (!strncmp(a, "CHECKING", 8)) updState = UPD_CHECKING;
+    else if (!strncmp(a, "STEP ", 5)) { if (updState == UPD_CHECKING) say(a + 5, 60); }  // what it does now
+    else if (!strncmp(a, "NONE", 4)) { updState = UPD_NONE; say(T(S_UPD_LATEST), 3); mood(MOOD_HAPPY, 1); }
+    else if (!strncmp(a, "AVAIL ", 6)) {
+      updState = UPD_AVAIL;
+      copyArg(updVer, sizeof updVer, a + 6);
+      snprintf(b, sizeof b, T(S_UPD_FOUND), updVer);
+      say(b, 5);
+      mood(MOOD_HAPPY, 1.5f);
+      hop(5);
+    }
+    else if (!strncmp(a, "ERR", 3)) { updState = UPD_ERR; say(a[3] ? a + 4 : T(S_UPD_ERR), 4); mood(MOOD_SAD, 2); }
+    else if (!strncmp(a, "RUN", 3)) { updRun = true; updRunT = now; confirm.target = 0; }
+    else if (!strncmp(a, "IDLE", 4)) { if (updState == UPD_CHECKING || updState == UPD_AVAIL) updState = UPD_IDLE; }
+    if (asleep) { asleep = false; H.brightness(S.bright); }
+    return;
+  } else if (!strncmp(line, "FWUP", 4)) {  // FWUP = the Raspberry starts writing · FWUP END = it is over
+    fwFlashing = strcmp(line, "FWUP END") != 0;
+    confirm.target = 0;
+    if (asleep) { asleep = false; H.brightness(S.bright); }
+    return;
   } else if (!strncmp(line, "FL ", 3)) {  // video list
     const char* a = line + 3;
     static bool skipList = false;  // a list pushed while the user sets up a print must not move files[suFile]
@@ -942,11 +1333,13 @@ static void drawToast(Canvas& c) {
   if (toast.v < 0.02f || !toastText[0]) return;
   float a = clampf(toast.v, 0, 1);
   char t[64];
-  fitText(F_SM, toastText, t, sizeof t, L.W - 60);
+  fitText(F_SM, toastText, t, sizeof t, L.W - 40);
   int tw = Canvas::textWidth(F_SM, t);
   float w = tw + 24, h = 20;
-  float x = L.W / 2.f + 8 - w / 2, y = (3.5f) - (1 - a) * 22;
+  float x = L.W / 2.f - w / 2, y = (3.5f) - (1 - a) * 22;
   if (x < 4) x = 4;
+  // the message has the top line to itself: half over the "Raspberry" chip it looked broken
+  c.fillRect(0, 0, L.W, 25, BG, a);
   c.fillRoundRect(x, y, w, h, 10, PANEL, a);
   c.strokeRoundRect(x, y, w, h, 10, 1, HOT, a * 0.8f);
   c.text(F_SM, (int)(x + 12), (int)(y + 14.5f), t, LIGHT, a);
@@ -1105,7 +1498,7 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
     c.fillRoundRect(LIST_X + dx, py - PILL_H / 2.f - stretch / 2, LIST_W, PILL_H + stretch, PILL_H / 2.f, PINK, listA * pillA);
     int n = pageCount(p);
     for (int i = skip; i < n; i++) {
-      float ry = listTop + (i - skip) * ROW_H - p.scroll.v;
+      float ry = listTop + rowPos(p, i) - skip * ROW_H - p.scroll.v;
       if (ry < LIST_CLIP - 16 || ry > L.H + 16) continue;
       float k = clampf(1 - fabsf(ry - py) / ROW_H, 0, 1);
       ItemId it = itemAt(p, i);
@@ -1127,18 +1520,55 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
         }
         continue;
       }
+      if (infoRow(it)) {  // System: a fact, a dim name and its value (as the old About screen)
+        char v[48], fv[48];
+        itemValue(it, v, sizeof v);
+        const char* nm = T(ITEM_NAME[it]);
+        int lx = (int)(LIST_X + ROW_PAD + dx);
+        int rx = (int)(LIST_X + LIST_W - ROW_PAD + dx);
+        int iy = (int)(ry + 4);  // a short row (infoH): text a little higher, the rule at its bottom
+        c.text(F_SM, lx, iy, nm, DIM, listA);
+        fitText(F_SM, v, fv, sizeof fv, rx - lx - Canvas::textWidth(F_SM, nm) - 10);
+        uint16_t col = (it == I_INF_RASP && piOk()) || (it == I_INF_VER && fwVer[0]) ? PINK : LIGHT;
+        c.textRight(F_SM, rx, iy, fv, col, listA);
+        c.fillRect(lx, (int)(ry + infoH() / 2.f - 1), rx - lx, 1, LINE, listA);
+        continue;
+      }
       uint16_t base = it == I_PRINT ? PINK : hex(0xD2B6C3);
       if (it == I_POWEROFF || it == I_REBOOT) base = hex(0xFF9DB8);
-      c.text(*FR, (int)(LIST_X + ROW_PAD + dx + k * 2), ty, T(ITEM_NAME[it]), lerpColor(base, DARK, k), listA);
       char v[32];
       itemValue(it, v, sizeof v);
+      const char* nm = T(ITEM_NAME[it]);
+      // beside Spinny "Перезагрузить Raspberry" is too long: the row says just the verb
+      // (the "Точно?" card still names the Raspberry)
+      int room = (int)LIST_W - 2 * ROW_PAD - Canvas::textWidth(F_SM, v) - 6;
+      if (it == I_UPD) {  // "Check for updates" → "Update to 0.8.5"; beside Spinny just "Updates"
+        if (updState == UPD_AVAIL) nm = T(S_UPD_DO);
+        else if (Canvas::textWidth(*FR, nm) > room) nm = T(S_UPD_SHORT);
+      }
+      if (it == I_FWUP && Canvas::textWidth(*FR, nm) > room) {  // narrow: the Version row has the number
+        v[0] = 0;
+        room = (int)LIST_W - 2 * ROW_PAD;
+      }
+      if ((it == I_REBOOT || it == I_POWEROFF) &&  // both or neither, so the pair reads alike
+          fmaxf(Canvas::textWidth(*FR, T(S_REBOOT)), Canvas::textWidth(*FR, T(S_POWEROFF))) > room)
+        nm = T(it == I_REBOOT ? S_REBOOT_SHORT : S_POWEROFF_SHORT);
+      c.text(*FR, (int)(LIST_X + ROW_PAD + dx + k * 2), ty, nm, lerpColor(base, DARK, k), listA);
+      if (it == I_UPD && updState == UPD_CHECKING) {  // a turning dot: it is working
+        float sx = LIST_X + LIST_W - ROW_PAD - 7 + dx, sy = ry, ang = now * 7;
+        uint16_t col = lerpColor(PINK, DARK, k);
+        c.ring(sx, sy, 6, 1.6f, lerpColor(FAINT, DARK, k * 0.6f), listA);
+        c.fillCircle(sx + cosf(ang) * 6, sy + sinf(ang) * 6, 2.2f, col, listA);
+        continue;
+      }
       if ((it == I_ROT || it == I_DARK || it == I_AXO_SHOW) && v[0] && strcmp(v, T(S_OFF))) vc = lerpColor(PINK, DARK, k);
       c.textRight(F_SM, (int)(LIST_X + LIST_W - ROW_PAD + dx), ty - 1, v, vc, listA);
     }
-    if (n > VISIBLE) {  // scroll indicator
+    float view = VISIBLE * ROW_H, all = pageHt(p);
+    if (all > view + 0.5f) {  // scroll indicator
       float span = L.H - LIST_CLIP - 8;
-      float frac = p.scroll.v / ((n - VISIBLE) * ROW_H);
-      float th = span * VISIBLE / n;
+      float frac = clampf(p.scroll.v / (all - view), 0, 1);
+      float th = span * view / all;
       c.fillRoundRect(L.W - 3 + dx, LIST_CLIP + 4 + (span - th) * frac, 2, th, 1, FAINT, listA);
     }
   }
@@ -1233,6 +1663,56 @@ static void drawSetup(Canvas& c, float dx, float ca, float dt) {
   drawEditCard(c, rowX + dx, pillY - PILL_H / 2.f, rowW, x + dx, y, w, h, ca);
 }
 
+// the silhouette centred on (cx, cy): one rectangle per run of set pixels in a row (cheap)
+static void drawShape(Canvas& c, float cx, float cy, uint16_t col, float a) {
+  if (!shapeOk || a < 0.01f) return;
+  int bpr = (shapeW + 7) / 8;
+  float x0 = cx - shapeW / 2.f, y0 = cy - shapeH / 2.f;
+  for (int y = 0; y < shapeH; y++) {
+    const uint8_t* row = shapeBits + y * bpr;
+    int x = 0;
+    while (x < shapeW) {
+      while (x < shapeW && !(row[x >> 3] & (0x80 >> (x & 7)))) x++;
+      int s = x;
+      while (x < shapeW && (row[x >> 3] & (0x80 >> (x & 7)))) x++;
+      if (x > s) c.fillRect(x0 + s, y0 + y, x - s, 1, col, a);
+    }
+  }
+}
+
+// the main page's last line: is the printer ready, and if not, the first thing that is missing
+static void drawReady(Canvas& c, float dx, float a) {
+  if (a < 0.01f) return;
+  char b[64], fb[64];
+  uint16_t col = PINK;
+  bool pi = piOk();
+  if (!pi) { snprintf(b, sizeof b, "%s", T(S_NO_RASP)); col = DIM; }
+  else if (oldSpinPi()) snprintf(b, sizeof b, "%s", T(S_OLD_SPINPI));
+  else if (sysHdmi == 0) { snprintf(b, sizeof b, "%s", T(S_NO_PROJ)); col = DIM; }
+  else if (updState == UPD_AVAIL) snprintf(b, sizeof b, T(S_UPD_HAVE), updVer);
+  else snprintf(b, sizeof b, "%s", T(S_READY));
+  bool good = pi && !oldSpinPi() && sysHdmi != 0;
+  int x = (int)(LIST_X + ROW_PAD + dx), r = (int)(LIST_X + LIST_W - ROW_PAD + dx), y = L.H - 12;
+  float pulse = good ? 1 : 0.55f + 0.45f * sinf(now * 3);
+  c.fillCircle(x + 3, y - 4, 3, good ? PINK : (pi ? HOT : FAINT), a * pulse);
+  // where there is room: the two links as dots on the right
+  int dotsW = 0;
+  if (LIST_W > 250) {
+    const char* names[2] = {T(S_PI), T(S_PROJECTOR)};
+    bool on[2] = {pi, pi && sysHdmi == 1};
+    int rx = r;
+    for (int i = 1; i >= 0; i--) {
+      int tw = Canvas::textWidth(F_SM, names[i]);
+      c.text(F_SM, rx - tw, y, names[i], on[i] ? DIM : FAINT, a);
+      c.fillCircle(rx - tw - 7, y - 4, 2.5f, on[i] ? PINK : FAINT, a);
+      rx -= tw + 18;
+    }
+    dotsW = r - rx;
+  }
+  fitText(F_SM, b, fb, sizeof fb, r - x - 12 - dotsW);
+  c.text(F_SM, x + 12, y, fb, col, a);
+}
+
 static void drawPrint(Canvas& c, float dx, float ca) {
   float cx = L.artCx, cy = 100, R = 52;
   float p = clampf(prog.v, 0, 1);
@@ -1244,11 +1724,26 @@ static void drawPrint(Canvas& c, float dx, float ca) {
   } else if (p > 0.002f) {
     c.arc(cx, cy, R, th, -1.5708f, -1.5708f + 6.2832f * p, PINK, ca);
   }
-  drawDial(c, cx, cy, R - 12, ca, false);
   char b[48];
   if (infinite) snprintf(b, sizeof b, "∞");
   else snprintf(b, sizeof b, "%d%%", (int)(p * 100 + 0.5f));
-  c.textCentered(F_MD, (int)cx, (int)cy + 6, b, LIGHT, ca);
+  if (shapeOk) {
+    // the part inside the vial: dark at first, lighting up with the dose. The light is on from the end
+    // of the wait; the dot on the inner circle still shows the vial turning.
+    float ri = R - 10, ang = (float)angleNow() * 0.0174533f - 1.5708f;
+    c.ring(cx, cy, ri, 1.2f, LINE, ca);
+    c.fillCircle(cx + cosf(ang) * ri, cy + sinf(ang) * ri, 2.4f, PINK, ca);
+    drawShape(c, cx, cy, FAINT, ca);
+    bool lit = waitKind[0] == 0;
+    float k = infinite ? 0.6f : p;
+    float glow = lit ? (0.25f + 0.75f * sqrtf(k)) * (0.88f + 0.12f * sinf(now * 5)) : 0;
+    if (glow > 0.02f) c.glow(cx, cy, R * 0.8f, HOT, 0.10f * glow * ca);
+    drawShape(c, cx, cy, PINK, ca * glow);
+    c.textCentered(F_MD, (int)cx, (int)(cy + R + 24), b, LIGHT, ca);
+  } else {
+    drawDial(c, cx, cy, R - 12, ca, false);
+    c.textCentered(F_MD, (int)cx, (int)cy + 6, b, LIGHT, ca);
+  }
 
   // text column: right of the dial
   int x = (int)(132 + dx), r = L.W - 8;
@@ -1339,36 +1834,6 @@ static void drawAsk(Canvas& c, float dx, float ca) {
   if (!askSent) c.text(F_SM, x, L.H - 8, T(S_SURE_HINT), FAINT, ca * 0.8f);
 }
 
-static void drawAbout(Canvas& c, float dx, float ca) {
-  int x, r, y0, step;
-  x = (int)LIST_X + 6; r = L.W - 8; y0 = 48; step = 30;
-  x += (int)dx;
-  struct { Str k; char v[40]; } rows[5];
-  rows[0].k = S_VERSION; snprintf(rows[0].v, 40, "%s", FW_VERSION);
-  rows[1].k = S_SCREEN;
-  snprintf(rows[1].v, 40, "ST7789 2.4\" %d×%d", L.W, L.H);
-  rows[2].k = S_PI; snprintf(rows[2].v, 40, "%s", piOk() ? T(S_CONNECTED) : T(S_NOT_CONNECTED));
-  rows[3].k = S_MOTOR; snprintf(rows[3].v, 40, "%d × 1/%d", S.stepsRev, S.micro);
-  rows[4].k = S_UPTIME; fmtTime(rows[4].v, 40, (int)now);
-  for (int i = 0; i < 5; i++) {
-    int y = y0 + i * step;
-    float a = ca * easeOut((now - enterT - i * 0.05f) / 0.3f);
-    const char* k = T(rows[i].k);
-    c.text(F_SM, x, y, k, DIM, a);
-    int room = r - x - Canvas::textWidth(F_SM, k) - 8;
-    const Font& f = Canvas::textWidth(F_MD, rows[i].v) <= room ? F_MD : F_SM;
-    char v[40];
-    fitText(f, rows[i].v, v, sizeof v, room);
-    c.textRight(f, r, y + 1, v, i == 2 && piOk() ? PINK : LIGHT, a);
-    c.fillRect(x, y + 8, r - x, 1, LINE, a);
-  }
-  // load: so people porting to other boards can see what it costs
-  char b[48];
-  snprintf(b, sizeof b, "%d fps · %.1f ms · %.1f KB", (int)(fps + 0.5f), (double)renderMs, (double)pushKB);
-  c.textRight(F_SM, r, L.H - 8, b, FAINT, ca);
-  c.text(F_SM, x, L.H - 24, HT(S_BACK_HINT), DIM, ca * 0.7f);
-}
-
 static void drawConnect(Canvas& c, float dx, float ca) {
   char b[64], fb[64];
   if (!qrOk) {
@@ -1409,11 +1874,146 @@ static void drawConfirm(Canvas& c) {
   float w = fminf(230.f, L.W - 16.f), h = 92, x = L.W / 2.f - w / 2, y = L.H / 2.f - h / 2 + (1 - a) * 14;
   c.fillRoundRect(x, y, w, h, 16, PANEL, a);
   c.strokeRoundRect(x, y, w, h, 16, 1.2f, HOT, a);
-  c.textCentered(F_SM, L.W / 2, (int)y + 26, T(ITEM_NAME[confirmItem]), DIM, a);
+  char ct[48];
+  if (confirmItem == I_UPD) snprintf(ct, sizeof ct, "%s %s", T(S_UPD_DO), updVer);
+  else snprintf(ct, sizeof ct, "%s", T(ITEM_NAME[confirmItem]));
+  c.textCentered(F_SM, L.W / 2, (int)y + 26, ct, DIM, a);
   c.textCentered(F_LG, L.W / 2, (int)y + 56, T(S_SURE), PINK, a);
   char hb[48];
   fitText(F_SM, HT(S_SURE_HINT), hb, sizeof hb, (int)w - 16);
   c.textCentered(F_SM, L.W / 2, (int)y + 78, hb, LIGHT, a * 0.7f);
+}
+
+// the first-setup wizard: one step a page. A progress bar on top, the step's text, the value it
+// sets (big), a checklist where it helps, the dial on the motor steps.
+static void wizRow(Canvas& c, int x, int r, int y, bool ok, const char* name, const char* val, float a) {
+  c.text(F_SM, x, y, ok ? "✓" : "•", ok ? PINK : FAINT, a);
+  c.text(F_SM, x + 16, y, name, DIM, a);
+  char v[64];
+  fitText(F_SM, val, v, sizeof v, r - x - 16 - Canvas::textWidth(F_SM, name) - 8);
+  c.textRight(F_SM, r, y, v, ok ? LIGHT : DIM, a);
+}
+static void drawWiz(Canvas& c, float dx, float ca) {
+  bool dial = wizMotorStep(wizStep);
+  int x = (int)((dial ? 132 : 16) + dx), r = L.W - 12, w = r - x;
+  float a = ca * easeOut((now - wizT) / 0.35f);
+  char b[64], fb[64];
+  // header + progress
+  snprintf(b, sizeof b, "%s", T(S_WIZ_STEP));
+  c.text(F_SM, x, 44, b, DIM, ca);
+  snprintf(b, sizeof b, "%d / %d", wizStep + 1, (int)WZ_COUNT);
+  c.textRight(F_SM, r, 44, b, DIM, ca);
+  static Ease bar;
+  bar.target = (wizStep + 1) / (float)WZ_COUNT;
+  bar.step(1 / 60.f, 10);
+  c.fillRoundRect(x, 50, w, 4, 2, LINE, ca);
+  c.fillRoundRect(x, 50, fmaxf(4, w * bar.v), 4, 2, PINK, ca);
+
+  static const Str TITLE[WZ_COUNT] = {S_WIZ_HELLO, S_WIZ_LINK, S_WIZ_FOCUS, S_P_CENTER, S_P_VIAL,
+                                      S_WIZ_DIR,   S_ONEREV,   S_SPEED,     S_BRIGHT,   S_DONE};
+  static const Str LINE1[WZ_COUNT] = {S_WIZ_HELLO1, S_COUNT,     S_WIZ_FOCUS1, S_WIZ_CENTER1, S_WIZ_VIAL1,
+                                      S_WIZ_DIR1,   S_WIZ_TURN1, S_WIZ_SPEED1, S_WIZ_SCREEN1, S_WIZ_DONE1};
+  static const Str LINE2[WZ_COUNT] = {S_COUNT,    S_COUNT,     S_COUNT,      S_COUNT, S_WIZ_VIAL2,
+                                      S_WIZ_DIR2, S_WIZ_TURN2, S_WIZ_SPEED2, S_COUNT, S_COUNT};
+  const char* title = T(TITLE[wizStep]);
+  const Font& tf = Canvas::textWidth(F_LG, title) <= w ? F_LG : F_MD;
+  fitText(tf, title, fb, sizeof fb, w);
+  c.text(tf, x, (int)(80 + (1 - a) * 6), fb, wizStep == WZ_DONE ? PINK : LIGHT, a);
+  bool pi = piOk();
+  bool noPi = wizNeedsPi(wizStep) && !pi;
+  Str l1 = noPi ? S_WIZ_NEED_PI : LINE1[wizStep];
+  if (wizStep == WZ_LINK) l1 = pi ? S_WIZ_LINK_OK : S_WIZ_LINK_NO;
+  char para[160];
+  if (!noPi && LINE2[wizStep] != S_COUNT) snprintf(para, sizeof para, "%s %s", T(l1), T(LINE2[wizStep]));
+  else snprintf(para, sizeof para, "%s", T(l1));
+  int textEnd = wrapText(c, F_SM, x, 102, w, 17, para, noPi || (wizStep == WZ_LINK && !pi) ? PINK : DIM, a,
+                         dial ? 4 : 2);
+  int vy = textEnd > 136 ? textEnd + 30 : 166;  // the big value goes below the text
+
+  // the value this step sets, big; or a checklist
+  float bx = bump.v > 0 ? bumpDir * bump.v * -4 : 0;
+  switch (wizStep) {
+    case WZ_HELLO: c.text(F_LG, x, 160, T(S_LANGNAME), PINK, a); break;
+    case WZ_LINK: {
+      wizRow(c, x, r, textEnd + 12, pi, T(S_PI), pi ? T(S_CONNECTED) : T(S_NOT_CONNECTED), a);
+      wizRow(c, x, r, textEnd + 32, sysHdmi == 1, T(S_WIZ_HDMI), sysHdmi == 1 ? T(S_CONNECTED) : (sysHdmi == 0 ? T(S_NOT_CONNECTED_M) : "—"), a);
+      bool net = pi && sysIp[0];
+      wizRow(c, x, r, textEnd + 52, net, T(S_NET), net ? sysIp : "—", a);
+      break;
+    }
+    case WZ_FOCUS: {
+      static const Str PN[3] = {S_P_FOCUS, S_P_GRID, S_P_CIRCLE};
+      if (!noPi) c.text(F_LG, (int)(x + bx), 160, T(PN[wizPat]), PINK, a);
+      break;
+    }
+    case WZ_CENTER: case WZ_VIAL:
+      if (noPi) break;
+      snprintf(b, sizeof b, wizStep == WZ_CENTER ? "%+d" : "%d", wizStep == WZ_CENTER ? calOffset : calVial);
+      c.text(F_XL, (int)(x + bx), 180, b, PINK, a);
+      c.text(F_SM, x + Canvas::textWidth(F_XL, b) + 6, 180, T(S_PX), DIM, a);
+      break;
+    case WZ_DIR: c.text(F_LG, (int)(x + bx), vy, T(S.dirInv ? S_CCW : S_CW), PINK, a); break;
+    case WZ_TURN: {
+      float done = clampf(fmodf((float)angleNow() + 3600, 360.f) / 360.f, 0, 1);
+      if (H.motorRpm() < 0.01f && angleNow() > 359) done = 1;
+      snprintf(b, sizeof b, "%.0f°", (double)fminf(360.f, (float)angleNow()));
+      c.text(F_LG, x, vy, b, PINK, a);
+      c.fillRoundRect(x, vy + 10, w, 4, 2, LINE, a);
+      c.fillRoundRect(x, vy + 10, fmaxf(4, w * done), 4, 2, PINK, a);
+      break;
+    }
+    case WZ_SPEED: {
+      char rr[16];
+      fmt2(rr, sizeof rr, S.rpm);
+      c.text(F_XL, (int)(x + bx), vy + 18, rr, PINK, a);
+      c.text(F_SM, x + Canvas::textWidth(F_XL, rr) + 6, vy + 18, T(S_RPM), DIM, a);
+      break;
+    }
+    case WZ_SCREEN: {
+      snprintf(b, sizeof b, "%d%%", S.bright);
+      c.text(F_XL, (int)(x + bx), 180, b, PINK, a);
+      break;
+    }
+    case WZ_DONE: {  // what the printer is now
+      char v[64], rr[16];
+      wizRow(c, x, r, textEnd + 6, pi, T(S_PI), pi ? T(S_CONNECTED) : T(S_NOT_CONNECTED), a);
+      wizRow(c, x, r, textEnd + 24, sysHdmi == 1, T(S_PROJECTOR), sysHdmi == 1 ? T(S_CONNECTED) : "—", a);
+      snprintf(v, sizeof v, "%+d %s · %d %s", calOffset, T(S_PX), calVial, T(S_PX));
+      wizRow(c, x, r, textEnd + 42, pi, T(S_P_CENTER), v, a);
+      fmt2(rr, sizeof rr, S.rpm);
+      snprintf(v, sizeof v, "%s · %s %s", T(S.dirInv ? S_CCW : S_CW), rr, T(S_RPM));
+      wizRow(c, x, r, textEnd + 60, true, T(S_MOTOR), v, a);
+      break;
+    }
+  }
+  Str hint = S_WIZ_HINT_NEXT;
+  if (wizStep == WZ_HELLO) hint = S_WIZ_HINT0;
+  else if (wizStep == WZ_FOCUS && !noPi) hint = S_WIZ_HINT_PIC;
+  else if ((wizStep == WZ_CENTER || wizStep == WZ_VIAL) && !noPi) hint = S_WIZ_HINT;
+  else if (wizStep == WZ_SPEED || wizStep == WZ_SCREEN) hint = S_WIZ_HINT;
+  else if (wizStep == WZ_DIR) hint = S_WIZ_HINT_DIR;
+  else if (wizStep == WZ_TURN) hint = S_WIZ_HINT_TURN;
+  else if (wizStep == WZ_DONE) hint = S_WIZ_HINT_END;
+  int hx = (int)(16 + dx);  // the dial ends above the hint line: it can take the whole width
+  fitText(F_SM, HT(hint), fb, sizeof fb, r - hx);
+  c.text(F_SM, hx, L.H - 10, fb, FAINT, ca * 0.8f);
+  if (dial) drawDial(c, L.artCx, L.artCy, L.dialR, ca);
+}
+
+// while the Raspberry writes a new firmware the board stops answering: say so, big
+static void drawFlashing(Canvas& c) {
+  if (!fwFlashing && !updRun) return;
+  c.fillRect(0, 0, L.W, L.H, BG, 0.9f);
+  float pulse = 0.5f + 0.5f * sinf(now * 4);
+  c.glow(L.W / 2.f, L.H / 2.f - 10, 80, HOT, 0.15f + 0.1f * pulse);
+  char b[64];
+  fitText(F_LG, T(updRun ? S_UPD_PI : S_FW_FLASHING), b, sizeof b, L.W - 16);
+  c.textCentered(F_LG, L.W / 2, L.H / 2 - 4, b, PINK);
+  fitText(F_SM, T(S_FW_DONT), b, sizeof b, L.W - 16);
+  c.textCentered(F_SM, L.W / 2, L.H / 2 + 22, b, LIGHT);
+  const char* sub = updRun ? T(S_UPD_PI_SUB) : (fwVer[0] ? fwVer : (updVer[0] ? updVer : ""));
+  fitText(F_SM, sub, b, sizeof b, L.W - 16);
+  c.textCentered(F_SM, L.W / 2, L.H / 2 + 42, b, DIM);
 }
 
 // ================================================================ Spinny's behaviour
@@ -1549,7 +2149,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   last = now;
   fps += (1.f / dt - fps) * 0.05f;
 
-  if (screen == SC_BOOT && now > 2.6f) go(SC_MENU);
+  if (screen == SC_BOOT && now > 2.6f) afterBoot();
   if (screen == SC_PRINT && everRx && !piOk()) {  // the Pi vanished mid-print: stop the motor here
     motorOn = false;
     H.spin(false, 0);
@@ -1562,7 +2162,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   if (pv.sel >= pageCount(pv)) pv.sel = pageCount(pv) - 1;
 
   // list geometry (animated between "beside Spinny" and "without him")
-  bool dial = (screen == SC_MENU && (pv.page == PG_SPIN || pv.page == PG_MOTOR)) || screen == SC_PRINT || (screen == SC_CONNECT && qrOk);
+  bool dial = (screen == SC_MENU && pv.page == PG_MOTOR) || screen == SC_PRINT || (screen == SC_CONNECT && qrOk);
   leftDial.target = dial ? 1 : 0;
   leftDial.step(dt, 8);
   bool axoOn = S.home == HOME_AXO;
@@ -1582,13 +2182,14 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   LIST_CLIP = L.lclip[0] + (L.lclip[1] - L.lclip[0]) * w;
   VISIBLE = w > 0.5f ? L.vis[1] : L.vis[0];
 
-  float top = pv.sel * ROW_H;
-  float vtop = (pv.page == PG_MAIN && S.home == HOME_CARD) ? fmx(top - ROW_H, 0) : top;  // rows under the card
+  float top = rowPos(pv, pv.sel);
+  float edge = rowEdge(pv, pv.sel), selH = rowHt(pv, pv.sel);
+  if (pv.page == PG_MAIN && S.home == HOME_CARD) edge = fmx(edge - ROW_H, 0);  // rows under the card
   {  // the list starts to move one row before the selection reaches the edge: no sudden jumps
-    int n = pageCount(pv);
-    float maxS = n > VISIBLE ? (n - VISIBLE) * ROW_H : 0;
-    float pad = (VISIBLE >= 3 && n > VISIBLE) ? ROW_H : 0;
-    float lo = vtop - (VISIBLE - 1) * ROW_H + pad, hi = vtop - pad;
+    float view = VISIBLE * ROW_H, all = pageHt(pv);
+    float maxS = all > view ? all - view : 0;
+    float pad = (VISIBLE >= 3 && all > view) ? ROW_H : 0;
+    float lo = edge + selH - view + pad, hi = edge - pad;
     if (pv.scroll.target < lo) pv.scroll.target = lo;
     if (pv.scroll.target > hi) pv.scroll.target = hi;
     pv.scroll.target = clampf(pv.scroll.target, 0, maxS);
@@ -1614,7 +2215,19 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   else if (screen == SC_DONE) m = MOOD_HAPPY;
   else if (screen == SC_MENU && !editing && !motorOn && now - lastInput > 60) m = MOOD_SLEEPY;
 
-  spHide.target = screen == SC_SETUP ? 1 : 0;
+  spHide.target = screen == SC_SETUP || screen == SC_WIZ ? 1 : 0;
+
+  // a check the Raspberry never answered (old SpinPi, no link); an update that never came back
+  if (updState == UPD_CHECKING && now - updT > 40) { updState = UPD_ERR; say(T(S_UPD_NOANSWER), 4); }
+  if (updRun && now - updRunT > 15 * 60) { updRun = false; updState = UPD_ERR; }
+  // sleep: the backlight goes off after S.sleepMin idle minutes on a quiet screen. Anything that
+  // needs the screen (a print, "Print?", a message, a key) wakes it.
+  bool sleepy = S.sleepMin > 0 && (screen == SC_MENU || screen == SC_CONNECT) && !motorOn && !editing &&
+                confirm.target == 0 && !fwFlashing && !updRun && now - lastInput > S.sleepMin * 60.f;
+  if (sleepy != asleep) {
+    asleep = sleepy;
+    H.brightness(asleep ? 0 : (screen == SC_PRINT && S.dark ? 10 : S.bright));
+  }
   spHide.step(dt, 14);
   static Ease axoFade;
   axoFade.target = S.home == HOME_AXO ? 1 : 0;
@@ -1672,18 +2285,20 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
     case SC_MENU:
       if (homeArt.v > 0.08f) drawHomeCard(c, homeArt.v * ca, cardSel.v);
       drawMenu(c, dx, ca);
+      if (pv.page == PG_MAIN) drawReady(c, dx, ca * (navDir != 0 ? easeOut(nav.v) : 1));
       break;
     case SC_SETUP: drawSetup(c, dx, ca, dt); break;
     case SC_PRINT: drawPrint(c, dx, ca); break;
     case SC_DONE: drawDone(c, dx, ca, dt); break;
-    case SC_ABOUT: drawAbout(c, dx, ca); break;
     case SC_CONNECT: drawConnect(c, dx, ca); break;
     case SC_ASK: drawAsk(c, dx, ca); break;
+    case SC_WIZ: drawWiz(c, dx, ca); break;
   }
   // (on the stacked layouts the edit card covers the dial's band: the dial goes while it is open)
   if (screen == SC_MENU && da > 0.01f) drawDial(c, L.artCx, L.artCy, L.dialR, da);
 
   drawConfirm(c);
+  drawFlashing(c);
   drawToast(c);
 
   // frame rate: a steady 60 whenever anything is alive on screen (changing it on the fly is what
@@ -1696,7 +2311,8 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   return still && now - stillSince > 2 ? 30 : 60;
 }
 
-void ui_stats(float frameMs, float kbPerFrame, float drawMs) {
+void ui_stats(float frameMs, float kbPerFrame, float drawMs, int cap) {
+  if (cap > 0) capFps = cap;
   renderMs += (frameMs - renderMs) * 0.1f;
   if (drawMs >= 0) drawMsAvg += (drawMs - drawMsAvg) * 0.1f;
   pushKB += (kbPerFrame - pushKB) * 0.1f;

@@ -44,6 +44,9 @@ bash "$SRC/SpinPi/pi_setup.sh"
 bash "$SRC/SpinPi/install.sh"
 echo
 echo "== SpinPrinter $REF installed. The board needs the same version: the flasher page flashes the latest release."
+# the update from the printer's screen (Settings → System) runs this with SPINPRINTER_NO_REBOOT=1:
+# install.sh has restarted SpinPi already, a reboot is not needed for an update
+if [ -n "${SPINPRINTER_NO_REBOOT:-}" ]; then exit 0; fi
 echo "== Rebooting in 10 s (the projector settings need it). Ctrl+C to stay."
 sleep 10
 reboot

@@ -22,7 +22,7 @@ ffmpeg reads works: MP4 (OpenCAL's too), lossless MKV (FFV1), PNG sequences, los
 
 | `--out` | where | for |
 |---|---|---|
-| `drm` | the projector on the Pi (DRM/KMS, page flip) | printing |
+| `drm` | the projector on the Raspberry (DRM/KMS, page flip) | printing |
 | `sdl` | a window on a PC | looking at it on a PC |
 | `null` | nowhere, an exact virtual 60 Hz | self-tests |
 
@@ -30,11 +30,11 @@ ffmpeg reads works: MP4 (OpenCAL's too), lossless MKV (FFV1), PNG sequences, los
 
 ```bash
 make                 # finds SDL2 and libdrm itself; without them only null is built
-make NO_SDL=1        # on the Pi
+make NO_SDL=1        # on the Raspberry
 ```
 Needs gcc, make, liblz4 (Raspberry Pi OS: `sudo apt install liblz4-dev libdrm-dev`).
 
-## Measuring on the Pi
+## Measuring on the Raspberry
 
 Stop the SpinPi service, connect a projector or monitor over HDMI:
 ```bash
@@ -44,8 +44,8 @@ sudo spinproj bench --rt --cpu 3 --video print.mp4    # your real video
 It shows the memory for one turn, how many such frames fit in RAM, the milliseconds to unpack a
 frame, how even the vsyncs are and how many were missed. The last line `RESULT …` has all the numbers.
 
-**Numbers from a PC say nothing about the Pi.** On the development PC a 1280×800 frame takes
-1.5–3 ms; on a Pi it will be slower (a Pi 3 more than a Pi 5). Only measuring tells how much.
+**Numbers from a PC say nothing about the Raspberry.** On the development PC a 1280×800 frame takes
+1.5–3 ms; on a Raspberry it will be slower (a Pi 3 more than a Pi 5). Only measuring tells how much.
 
 ## Commands (stdin → SpinProj)
 

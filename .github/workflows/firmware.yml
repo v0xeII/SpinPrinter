@@ -8,6 +8,8 @@
 #    and the flasher is published again;
 #  * the flasher always flashes the LATEST RELEASE, not whatever main has today. The flasher, the
 #    release page and SpinPi's get.sh (which installs the latest release on the Pi) agree.
+#  * every build here is a release build (-DSPIN_RELEASE=1, board.h): on a board it keeps the wiring
+#    the board saved, so the Raspberry can put it on any board over the air.
 name: firmware
 on:
   push:
@@ -50,7 +52,7 @@ jobs:
             echo "core install failed, retry $i in $((i * 30)) s"; sleep $((i * 30))
           done
       - name: compile
-        run: arduino-cli compile --fqbn "$FQBN" --build-path build SpinScreen_v0.7/SpinScreen
+        run: arduino-cli compile --fqbn "$FQBN" --build-property "compiler.cpp.extra_flags=-DSPIN_RELEASE=1" --build-path build SpinScreen_v0.7/SpinScreen
       - name: release files (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -100,7 +102,7 @@ jobs:
             echo "core install failed, retry $i in $((i * 30)) s"; sleep $((i * 30))
           done
       - name: compile ${{ steps.rel.outputs.tag }}
-        run: arduino-cli compile --fqbn "$FQBN" --build-path build SpinScreen_v0.7/SpinScreen
+        run: arduino-cli compile --fqbn "$FQBN" --build-property "compiler.cpp.extra_flags=-DSPIN_RELEASE=1" --build-path build SpinScreen_v0.7/SpinScreen
       - name: flasher site (page + wiring + firmware parts + manifest, all from the release)
         run: |
           # served at /flasher/ and, for Actions-mode Pages, at /

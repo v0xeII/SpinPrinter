@@ -50,6 +50,26 @@ static void frames(int ms) {  // run the UI at 60 fps for this long
 }
 static void key(Key k, int wait = 450) { ui_key(k, nowMs); frames(wait); }
 static void line(const char* l) { ui_line(l, nowMs); }
+// a lattice cube, as SpinPi sends the silhouette of a .spin preview (SHAPE lines, 8 rows a line)
+static void sendShape() {
+  const int W = 56, H = 56, BPR = 7;
+  uint8_t bits[H * BPR] = {};
+  for (int y = 6; y < 50; y++)
+    for (int x = 6; x < 50; x++) {
+      int u = (x - 6) % 15, v = (y - 6) % 15;
+      bool bar = u < 4 || v < 4 || x >= 46 || y >= 46;
+      if (bar) bits[y * BPR + x / 8] |= 0x80 >> (x % 8);
+    }
+  char b[160];
+  snprintf(b, sizeof b, "SHAPE BEGIN %d %d", W, H);
+  line(b);
+  for (int y0 = 0; y0 < H; y0 += 8) {
+    int n = snprintf(b, sizeof b, "SHAPE %d ", y0);
+    for (int i = y0 * BPR; i < (y0 + 8) * BPR && i < H * BPR; i++) n += snprintf(b + n, sizeof b - n, "%02X", bits[i]);
+    line(b);
+  }
+  line("SHAPE END");
+}
 static void shot(const char* name) {
   char fn[512];
   snprintf(fn, sizeof fn, "%s/%02d_%s.ppm", dir.c_str(), shotN++, name);
@@ -80,6 +100,7 @@ int main(int argc, char** argv) {
   line("URL http://192.168.1.42");
   line("HOST spinslicer.local");
   line("NET SpinSlicer-5G");
+  line("SYS ip=192.168.1.42 wifi=72 temp=48.3 sd=12.4 usb=7.1 prints=14 proj=3.2 hdmi=1");
   frames(1300);
   shot("boot");
   frames(3500);
@@ -89,6 +110,9 @@ int main(int argc, char** argv) {
     key(K_DOWN);
     key(K_OK, 900);
     shot("settings_axo");
+    for (int i = 0; i < 4; i++) key(K_DOWN, 200);
+    key(K_OK, 1200);  // Система beside Spinny: the narrow list must still fit
+    shot("system_axo");
     return 0;
   }
   key(K_DOWN, 700);
@@ -108,6 +132,7 @@ int main(int argc, char** argv) {
   key(K_OK);
   key(K_DOWN);
   key(K_DOWN, 700);
+  sendShape();
   line("FILE lattice_cube_1280x800.mp4");
   line("RPM 4");
   line("SPIN 1");
@@ -131,28 +156,62 @@ int main(int argc, char** argv) {
   shot("connect");
   key(K_OK, 900);
   key(K_DOWN);
-  key(K_OK, 900);  // Настройки: the five groups
+  key(K_OK, 900);  // Настройки: the wizard on top, then the groups
   shot("settings");
-  key(K_OK, 900);  // Вращение
+  key(K_DOWN, 200);
+  key(K_OK, 900);  // Мотор (rotation + the motor's settings)
   key(K_OK, 1500);  // Вращение: вкл
-  shot("spin");
+  shot("motor");
   key(K_OK);  // off again
   key(K_DOWN);
   key(K_OK, 800);  // edit the speed
   shot("edit_speed");
   key(K_OK);
   key(K_BACK, 900);  // back to the groups
-  for (int i = 0; i < 4; i++) key(K_DOWN, 200);
-  key(K_OK, 900);  // Система
-  key(K_DOWN, 200);
-  key(K_DOWN, 200);
-  key(K_OK, 1200);  // О принтере
-  shot("about");
-  key(K_OK, 900);  // back on the system page
-  key(K_UP);
-  key(K_OK, 700);  // Выключить Pi -> Точно?
+  for (int i = 0; i < 3; i++) key(K_DOWN, 200);
+  key(K_OK, 1200);  // Система: the printer's facts + the buttons (the pill starts on "Проверить обновления")
+  shot("system");
+  key(K_OK, 300);  // -> EV UPDCHECK; the Raspberry answers from GitHub
+  line("UPD STEP Скачиваю прошивку 0.8.5…");
+  frames(600);
+  shot("update_checking");
+  line("UPD AVAIL 0.8.5");
+  frames(900);
+  shot("update_avail");
+  key(K_OK, 700);  // Обновить до 0.8.5 -> Точно?
   shot("confirm");
+  key(K_OK, 300);  // -> EV UPDATE: first the board's firmware, then the Raspberry itself
+  line("FWUP");
+  frames(800);
+  shot("fw_update");
+  line("FWUP END");
+  line("UPD RUN pi");
+  frames(800);
+  shot("pi_update");
+  line("UPD IDLE");
+  frames(400);
+  // the first-setup wizard (Настройки → Мастер настройки)
   key(K_BACK, 900);
+  for (int i = 0; i < 4; i++) key(K_UP, 200);
+  key(K_OK, 900);
+  shot("wiz_hello");
+  key(K_OK, 900);  // -> the links
+  shot("wiz_link");
+  key(K_OK, 600);  // -> focus
+  key(K_OK, 600);  // -> centering
+  for (int i = 0; i < 3; i++) key(K_UP, 150);
+  frames(600);
+  shot("wiz_center");
+  key(K_OK, 600);  // -> vial width
+  key(K_OK, 1800);  // -> direction (the vial turns)
+  shot("wiz_dir");
+  key(K_OK, 2500);  // -> one exact turn
+  shot("wiz_turn");
+  key(K_OK, 600);  // -> print speed
+  key(K_OK, 600);  // -> screen
+  key(K_OK, 900);  // -> done
+  shot("wiz_done");
+  key(K_OK, 900);
   // a print sent from SpinSlicer: the yes on the printer
   line("ASK 6 214 lattice_cube.spin");
   frames(900);

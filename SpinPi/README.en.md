@@ -2,7 +2,7 @@
 
 [Русский](README.md) · **English**
 
-Printing without a USB stick: the Pi is on Wi-Fi, the printer screen shows a **QR code**, you
+Printing without a USB stick: the Raspberry is on Wi-Fi, the printer screen shows a **QR code**, you
 scan it with a phone, the printer page opens, you drop a video from SpinSlicer on it and press
 "Print". While printing the page shows the time left, the motor speed and the sync.
 
@@ -29,14 +29,14 @@ Step by step with pictures: [docs/INSTALL.md](../docs/INSTALL.md).
 sudo bash SpinPi/make_sd_card.sh
 ```
 It finds the card, asks you to type "yes" and your Wi-Fi, wipes the card, writes Raspberry Pi OS Lite
-64-bit, sets up SSH login with this computer's key and keeps the screen black. The Pi installs
+64-bit, sets up SSH login with this computer's key and keeps the screen black. The Raspberry installs
 SpinPi and SpinProj by itself on the first start (10–20 minutes, needs internet).
 
 **Any OS:**
-1. **Raspberry Pi Imager** → your Pi model → **Raspberry Pi OS Lite (64-bit)** → settings: hostname
-   **spinslicer**, a user and password, your Wi-Fi, **SSH on**. Write, put the card in the Pi, power on, wait 3 minutes.
+1. **Raspberry Pi Imager** → your Raspberry model → **Raspberry Pi OS Lite (64-bit)** → settings: hostname
+   **spinslicer**, a user and password, your Wi-Fi, **SSH on**. Write, put the card in the Raspberry, power on, wait 3 minutes.
 2. Log in from the computer (Windows: PowerShell): `ssh user@spinslicer.local`
-3. One command on the Pi (10–20 minutes, then it reboots; run again to update):
+3. One command on the Raspberry (10–20 minutes, then it reboots; run again to update):
    ```
    curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash
    ```
@@ -48,7 +48,7 @@ SpinPi and SpinProj by itself on the first start (10–20 minutes, needs interne
 **From SpinSlicer:** "Send to printer". The slicer finds the printer on the network (mDNS) and
 sends a `.spin` file: the one-turn video, a picture of the part and the planned turns in one file.
 
-**From a USB stick (like OpenCAL):** put the `.spin` or MP4 on a stick, plug it into the Pi. On the printer
+**From a USB stick (like OpenCAL):** put the `.spin` or MP4 on a stick, plug it into the Raspberry. On the printer
 screen: **Print** → pick the video → check turns, exposure and pause → the pink **PRINT**. The stick
 is mounted read-only.
 
@@ -100,14 +100,14 @@ The printer also keeps the dose even:
 - **frame rate:** if the video fps does not divide the refresh (24 fps on 60 Hz), frames stay up
   2 or 3 refreshes in turn; the printer warns: export 30 or 60 fps;
 - **faults:** no angle from the ESP for 0.3 s → SpinProj switches the light off by itself; the ESP
-  silent for 1 s or the motor 5 % off speed → the print stops. If the Pi goes away, the ESP stops the motor;
+  silent for 1 s or the motor 5 % off speed → the print stops. If the Raspberry goes away, the ESP stops the motor;
 - **dropped frames** (missed vsyncs) are counted and shown.
 
 Videos without a plan (older ones, OpenCAL with `_9rpm` in the name) print too: you set the turns.
 Stop a print on the page or on the printer screen (hold OK).
 
 ## Projector setup
-On the printer screen (Service → Projector) and on the page:
+On the printer screen (Settings → Projector) and on the page:
 - **Grid, Focus, Circle, White**: test pictures for focusing. **Black** switches the picture off.
 - **Center**: a line on the axis. Move it until it matches the vial's rotation axis; the shift
   applies to every print.
@@ -116,11 +116,28 @@ On the printer screen (Service → Projector) and on the page:
 
 Keep resin out of the light!
 
+## The System page on the screen and the board's firmware
+Every 10 s the Raspberry sends the screen (Settings → System) its IP, Wi-Fi signal, CPU temperature,
+free space on the card and the USB stick, the number of prints and the **projector hours**. The hours
+count while HDMI sees the projector (many projectors keep the LED on even for a black picture) and
+are kept in `/var/lib/spinpi/settings.json` (`projector_s`). Nothing of this is sent during a print.
+
+**Updates over the air** (the same page, "Check for updates" → "Update to …"): SpinPi asks GitHub
+for the latest release (`github.com/<repo>/releases/latest`), downloads the release's board firmware to
+`/var/lib/spinpi/fw` and, if it fits the board, writes it with `esptool` (the app only, from 0x10000).
+Then it starts the release's `get.sh` as a job of its own (`systemd-run --unit=spinprinter-update`,
+`SPINPRINTER_NO_REBOOT=1`): the install restarts SpinPi, and the new SpinPi says on the screen how it
+went. Log: `/var/log/spinprinter-update.log`. State: `GET /api/state` → `update`. Needs the internet,
+root (the service is root anyway) and `esptool` (`sudo apt install esptool`, `install.sh` does it).
+
+**Update firmware** shows up when a USB stick has a fitting board firmware (`spinscreen*.bin` in its
+top folder: your own build). Progress and errors: `GET /api/state` → `firmware`.
+
 ## Troubleshooting
 - Logs: `journalctl -u spinpi -f` · restart: `sudo systemctl restart spinpi`
 - Projector resolution: `--projector auto` (default; asks the HDMI) or e.g. `--projector 1280x800` in
   `/etc/systemd/system/spinpi.service`, then `sudo systemctl daemon-reload && sudo systemctl restart spinpi`.
-- Can the Pi keep up: `sudo systemctl stop spinpi && sudo /opt/spinpi/spinproj bench --rt --cpu 3`.
+- Can the Raspberry keep up: `sudo systemctl stop spinpi && sudo /opt/spinpi/spinproj bench --rt --cpu 3`.
 
 ## For developers: HTTP API
 | | |
@@ -148,6 +165,6 @@ No password: everyone on your Wi-Fi sees the page. Fine for a home network.
 `path=/api/printer`. `spinpi.py` writes the service file `/etc/avahi/services/spinprinter.service`
 itself (the installer puts a first copy there). From a PC: `avahi-browse -rt _spinprinter._tcp`.
 
-**Tests without a Pi:** `python -m unittest discover tests` (Windows, Mac, Linux; no ESP, no ffmpeg needed).
+**Tests without a Raspberry:** `python -m unittest discover tests` (Windows, Mac, Linux; no ESP, no ffmpeg needed).
 
 `fake_esp.py` pretends to be the ESP32; better is the [virtual ESP32](../SpinScreen_v0.7/sim/virtual_esp.cpp), the real screen UI in a window.

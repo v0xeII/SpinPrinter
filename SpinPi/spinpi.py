@@ -21,8 +21,10 @@ import json
 import os
 import queue
 import re
+import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -127,6 +129,10 @@ class Esp:
         self.port = ""
         self._next = 0  # which candidate to try next
         self.last_pong = 0.0
+        self.pins = None  # the board's wiring (PINS -> SPINPINS <pins> [nvs])
+        self.nvs = False  # the board keeps its wiring in its flash: a release build fits it
+        self.pins_asked = None  # for which firmware version PINS was asked
+        self.paused = threading.Event()  # set while a new firmware is written: the port is left alone
         self.events = queue.Queue()
         threading.Thread(target=self._run, daemon=True).start()
         threading.Thread(target=self._events, daemon=True).start()
@@ -170,6 +176,11 @@ class Esp:
     def _run(self):
         last_ping = 0
         while True:
+            if self.paused.is_set():
+                if self.ser is not None:
+                    self._drop("paused (firmware update)")
+                time.sleep(0.2)
+                continue
             if self.ser is None:
                 port = self._find_port() if serial else None
                 if not port:
@@ -236,7 +247,14 @@ class Esp:
                 self.hello()  # the greeting may have gone to a port that was not listening yet
             self.connected = True
             self.last_pong = time.monotonic()
-            self.version = line.split()[-1]
+            v = line.split()[-1]
+            if v != getattr(self, "version", ""):  # another firmware: its wiring has to be asked again
+                self.pins = self.pins_asked = None
+            self.version = v
+        elif line.startswith("SPINPINS "):
+            p = line[9:].split()
+            self.pins = p[0] if p else None
+            self.nvs = "nvs" in p[1:]
         elif line.startswith("READY"):  # ESP rebooted
             self.hello()
         elif line.startswith("EV "):
@@ -244,6 +262,19 @@ class Esp:
                 threading.Thread(target=self.on_event, args=("STOP",), daemon=True).start()
             else:
                 self.events.put(line[3:])
+
+    def pause(self, timeout=3.0):
+        """Let go of the serial port (esptool needs it). Returns the port the ESP was on."""
+        port = self.port
+        self.paused.set()
+        end = time.monotonic() + timeout
+        while self.ser is not None and time.monotonic() < end:
+            time.sleep(0.05)
+        return port
+
+    def resume(self):
+        self.connected = False
+        self.paused.clear()
 
     def send(self, line):
         s = self.ser
@@ -998,8 +1029,9 @@ class Warmup:
     """Lamp/LED output drifts for the first minutes. Count from the moment HDMI saw the projector."""
 
     def __init__(self, watch=True):
-        self.since = time.monotonic()  # unknown at start: assume it was switched on with the Pi
+        self.since = time.monotonic()  # unknown at start: assume it was switched on with the Raspberry
         self.connected = None
+        self.on_s = 0.0  # seconds the projector was on (HDMI connected) not yet added to the counter
         if watch:  # --hdmi ignore (PC tests): never say "not connected"
             threading.Thread(target=self._run, daemon=True).start()
 
@@ -1022,6 +1054,12 @@ class Warmup:
                 log("projector: HDMI connected")
             self.connected = c
             time.sleep(1)
+            if c:
+                self.on_s += 1.0
+
+    def take_on_s(self):
+        s, self.on_s = self.on_s, 0.0
+        return s
 
     def left(self, minutes):
         if self.connected is False:
@@ -1081,6 +1119,17 @@ class Printer:
         # then offset 0 / width 400 are only defaults and the profile does not offer them as values
         self.settings.setdefault("calibrated", self.settings["vial_px"] != 400 or self.settings["offset_px"] != 0)
         self.settings.setdefault("prints", 0)
+        self.settings.setdefault("projector_s", 0.0)  # how long the projector has been on, all in all
+        self.counters_saved = time.monotonic()
+        self.fw_offer = None  # a firmware for the board (firmware_info), offered on its screen
+        self.fw_state = {"state": "idle", "msg": ""}  # idle | flashing | ok | error
+        self.update = None  # what the last "Check for updates" found: {tag, version, pi, fw}
+        self.shapes = {}  # print id -> SHAPE lines (or None): the part's silhouette for the screen
+        self.upd_state = {"state": "idle", "msg": ""}  # idle | checking | none | available | updating | error
+        # an update of the Raspberry ran before this start: say how it went once the board is there
+        self.update_done = self.settings.pop("update_pending", None)
+        if self.update_done:
+            self.save_settings()
         self.history = load_json(self.history_path, [])
         self.on_profile = None  # called after the profile changes (mDNS name)
         self.state = "idle"  # idle | wait | print | done | error
@@ -1217,7 +1266,8 @@ class Printer:
              "sync_ms": self.sync_ms, "drops": self.drops, "motor_rpm": self.motor_rpm,
              "motor_angle": self.motor_angle % 360, "settings": self.settings, "pattern": self.pattern,
              "history": self.history[-8:], "version": VERSION, "request": self.request_view(),
-             "engine": "angle" if self.angle_mode else "mpv"}
+             "engine": "angle" if self.angle_mode else "mpv", "firmware": self.firmware_view(),
+             "update": self.update_view()}
         if j:
             d["job"] = {k: j.get(k) for k in ("seq", "id", "file", "rpm", "revs", "time_s", "factor", "plan_revs",
                                               "reversed")}
@@ -1443,6 +1493,12 @@ class Printer:
             self.calibrate(offset=int(p[1]))
         elif p[0] == "VIALW" and len(p) > 1:
             self.calibrate(vial=int(p[1]))
+        elif p[0] == "FWUPDATE":
+            threading.Thread(target=self.firmware_update, daemon=True).start()
+        elif p[0] == "UPDCHECK":
+            threading.Thread(target=self.check_updates, daemon=True).start()
+        elif p[0] == "UPDATE":
+            threading.Thread(target=self.run_update, daemon=True).start()
         elif p[0] in ("REBOOT", "POWEROFF"):
             self.stop("перезагрузка" if p[0] == "REBOOT" else "выключение")
             self.proj.black()
@@ -1452,6 +1508,182 @@ class Printer:
                 subprocess.Popen(["systemctl", "reboot" if p[0] == "REBOOT" else "poweroff"])
             else:
                 log("(not root: would", p[0].lower(), ")")
+
+    def send_shape(self, fid, make=None):
+        """The part's silhouette to the screen before a print (SHAPE -: none, a plain video)."""
+        if fid not in self.shapes:
+            png, kind = self.lib.thumb_file(fid)
+            self.shapes[fid] = (make or part_shape)(png) if kind == "image/png" else None
+        lines = self.shapes[fid]
+        for line in lines or ["SHAPE -"]:
+            self.esp.send(line)
+
+    # ---- the Raspberry itself: what the System page shows, counters, the board's firmware
+    def tick_counters(self):
+        """Adds the projector's on-time; saved every 5 minutes (not every 10 s: the SD card)."""
+        self.settings["projector_s"] = float(self.settings.get("projector_s") or 0) + self.warm.take_on_s()
+        if time.monotonic() - self.counters_saved > 300:
+            self.counters_saved = time.monotonic()
+            self.save_settings()
+
+    def system_info(self):
+        usb = [g for g in (free_gb(d) for d in self.lib.usb_dirs_fn()) if g is not None]
+        return {"ip": my_ip(), "wifi": wifi_signal(), "temp": cpu_temp(), "sd_free_gb": free_gb(self.data),
+                "usb_free_gb": sum(usb) if usb else None, "prints": int(self.settings.get("prints") or 0),
+                "projector_h": float(self.settings.get("projector_s") or 0) / 3600.0,
+                "hdmi": getattr(self.warm, "connected", None)}
+
+    def firmware_view(self):
+        offer = {k: self.fw_offer[k] for k in ("version", "source")} if self.fw_offer else None
+        return dict(self.fw_state, offer=offer)
+
+    def refresh_firmware(self):
+        """Looks for a firmware to offer and tells the screen (FW <version> <source> / FW -)."""
+        if self.fw_state["state"] == "flashing":
+            return
+        f = pick_firmware(firmware_files(self.lib.usb_dirs_fn()), self.esp.version,
+                          getattr(self.esp, "pins", None), getattr(self.esp, "nvs", False))
+        self.fw_offer = f
+        self.esp.send(f"FW {f['version']} {f['source']}" if f else "FW -")
+
+    def firmware_update(self, flash=None, f=None):
+        """EV FWUPDATE from the screen: writes the offered firmware with esptool, then waits for the board.
+        Returns True when it was written."""
+        f = f or self.fw_offer
+        if self.busy():
+            self.esp.send("MSG Сначала дождись конца печати")
+            return False
+        if not f or self.fw_state["state"] == "flashing":
+            return False
+        self.fw_state = {"state": "flashing", "msg": f["version"]}
+        self.esp.send("FWUP")
+        time.sleep(0.5)  # the screen draws "Updating…" before it stops answering
+        port = self.esp.pause()
+        try:
+            ok, msg = (flash or flash_firmware)(f, port) if port else (False, "плата не найдена")
+        finally:
+            self.esp.resume()
+        end = time.monotonic() + 25  # the board restarts with the new firmware
+        while not self.esp.connected and time.monotonic() < end:
+            time.sleep(0.2)
+        self.esp.send("FWUP END")
+        if ok:
+            self.fw_state = {"state": "ok", "msg": f["version"]}
+            self.esp.send(f"MSG Прошивка {self.esp.version or f['version']} установлена")
+        else:
+            self.fw_state = {"state": "error", "msg": msg}
+            self.esp.send(f"MSG Прошивка не записана: {msg}"[:150])
+        log("firmware update:", self.fw_state)
+        self.fw_offer = None
+        return ok
+
+    # ---- updates over the air (Settings → System → "Check for updates")
+    def check_updates(self, latest=None, fetch=None):
+        """EV UPDCHECK: asks GitHub for the latest release. The Raspberry needs it when it is newer than
+        this SpinPi; the board when it is newer than its firmware and the release's firmware fits it
+        (downloaded here to check). Tells the screen: UPD AVAIL <version> / UPD NONE / UPD ERR <why>."""
+        if self.busy():
+            self.esp.send("UPD ERR Сначала дождись конца печати")
+            return
+        self.upd_state = {"state": "checking", "msg": ""}
+        self.esp.send("UPD CHECKING")
+        try:
+            self.esp.send("UPD STEP Спрашиваю GitHub…")  # the screen shows each step, so it is not silent
+            tag = (latest or latest_release)()
+            ver = tag.lstrip("v")
+            new = version_tuple(ver)
+            pi = bool(new and new > (version_tuple(VERSION) or (0,)))
+            fw, fw_blocked = None, False
+            have = version_tuple(self.esp.version)
+            if new and have and new > have:
+                os.makedirs(os.path.join(self.data, "fw"), exist_ok=True)
+                path = os.path.join(self.data, "fw", f"spinscreen-{tag}-merged.bin")
+                if not os.path.exists(path):
+                    self.esp.send(f"UPD STEP Скачиваю прошивку {ver}…")
+                    (fetch or download)(release_firmware_url(tag), path)
+                info = firmware_info(path, "release")
+                if firmware_fits(info, self.esp.pins, self.esp.nvs):
+                    fw = info
+                else:
+                    fw_blocked = True
+        except Exception as e:  # noqa: BLE001 - no internet, GitHub down, a bad file
+            log("update check:", e)
+            self.upd_state = {"state": "error", "msg": str(e)[:100]}
+            self.esp.send("UPD ERR Нет связи с GitHub")
+            return
+        self.update = {"tag": tag, "version": ver, "pi": pi, "fw": fw}
+        if pi or fw:
+            self.upd_state = {"state": "available", "msg": ver}
+            self.esp.send(f"UPD AVAIL {ver}")
+        elif fw_blocked:
+            self.upd_state = {"state": "error", "msg": "the release firmware does not fit the board's wiring"}
+            self.esp.send("UPD ERR Прошивку платы обнови с компьютера")
+        else:
+            self.upd_state = {"state": "none", "msg": ver}
+            self.esp.send("UPD NONE")
+
+    def run_update(self, flash=None, run=None, watch=True):
+        """EV UPDATE: first the board's firmware (SpinPi writes it), then the Raspberry itself (get.sh of
+        the release, outside this service: its install restarts SpinPi)."""
+        u = self.update
+        if not u or self.busy() or self.upd_state["state"] == "updating":
+            return
+        self.upd_state = {"state": "updating", "msg": u["version"]}
+        if u["fw"] and not self.firmware_update(flash=flash, f=u["fw"]):
+            self.upd_state = {"state": "error", "msg": self.fw_state.get("msg", "")}
+            self.esp.send("UPD ERR Прошивка платы не записана")
+            return
+        if not u["pi"]:
+            self.update = None
+            self.upd_state = {"state": "none", "msg": u["version"]}
+            self.esp.send("UPD IDLE")
+            return
+        self.update_raspberry(u["tag"], run=run, watch=watch)
+
+    def update_raspberry(self, tag, run=None, watch=True):
+        root = hasattr(os, "geteuid") and os.geteuid() == 0
+        if not root and not run:
+            self.upd_state = {"state": "error", "msg": "not root"}
+            self.esp.send("UPD ERR SpinPi запущен не от root")
+            return
+        self.settings["update_pending"] = tag
+        self.save_settings()
+        self.esp.send("UPD RUN pi")
+        try:
+            (run or subprocess.run)(raspberry_update_cmd(tag), check=True, timeout=30)
+        except Exception as e:  # noqa: BLE001
+            self.settings.pop("update_pending", None)
+            self.save_settings()
+            self.upd_state = {"state": "error", "msg": str(e)[:100]}
+            self.esp.send("UPD ERR Не удалось запустить обновление")
+            return
+        if watch:
+            threading.Thread(target=self._watch_update, daemon=True).start()
+
+    def _watch_update(self):
+        """get.sh restarts SpinPi when it succeeds. Still here after it ended = it failed."""
+        time.sleep(5)
+        while True:
+            r = subprocess.run(["systemctl", "is-active", "spinprinter-update"], capture_output=True, text=True)
+            if r.stdout.strip() not in ("active", "activating"):
+                break
+            time.sleep(3)
+        time.sleep(20)  # a successful install restarts us within these seconds
+        self.settings.pop("update_pending", None)
+        self.save_settings()
+        try:
+            tail = open("/var/log/spinprinter-update.log", encoding="utf-8", errors="replace").read().strip()
+            tail = tail.splitlines()[-1][:80] if tail else ""
+        except OSError:
+            tail = ""
+        log("Raspberry update failed:", tail)
+        self.upd_state = {"state": "error", "msg": tail}
+        self.esp.send("UPD ERR Raspberry не обновилась" + (f": {tail}" if tail else ""))
+
+    def update_view(self):
+        u = self.update
+        return dict(self.upd_state, available={"version": u["version"], "raspberry": u["pi"],
+                                               "board": bool(u["fw"])} if u else None)
 
     # ---- the job thread
     def _wait(self, seconds_fn, kind):
@@ -1476,6 +1708,7 @@ class Printer:
         try:
             self.state, self.msg, self.sync_ms, self.drops, self.pattern = "wait", "", None, 0, "black"
             self.proj.black()
+            self.send_shape(j["id"])
             e.send("FILE " + j["file"].encode("utf-8")[:60].decode("utf-8", "ignore"))
             e.send(f"TURNS {j['revs']}")
             e.send(f"RPM {j['rpm']:.4f}")
@@ -1575,6 +1808,7 @@ class Printer:
             # unpacks while the motor spins up
             pr.load(j["path"], frames, self.settings["offset_px"], reverse=j.get("reversed"), phase_deg=j.get("phase", 0.0))
             threading.Thread(target=self._feed_angles, args=(done,), daemon=True).start()
+            self.send_shape(j["id"])
             e.send("FILE " + j["file"].encode("utf-8")[:60].decode("utf-8", "ignore"))
             e.send(f"TURNS {j['revs']}")
             e.send(f"RPM {j['rpm']:.4f}")
@@ -1802,6 +2036,272 @@ def wifi_name():
             elif line.strip():
                 return line.strip()
     return ""
+
+
+def wifi_signal():
+    """Wi-Fi link quality in % (0..100), None without Wi-Fi. /proc/net/wireless: 'wlan0: 0000   52.  -58. ...'"""
+    try:
+        lines = open("/proc/net/wireless").read().splitlines()[2:]
+    except OSError:
+        return None
+    for line in lines:
+        p = line.split()
+        if len(p) >= 3:
+            try:
+                return max(0, min(100, round(float(p[2].rstrip(".")) * 100 / 70)))
+            except ValueError:
+                continue
+    return None
+
+
+def cpu_temp():
+    """CPU temperature, °C, or None (not a Raspberry)."""
+    try:
+        return int(open("/sys/class/thermal/thermal_zone0/temp").read().strip()) / 1000.0
+    except (OSError, ValueError):
+        return None
+
+
+def free_gb(path):
+    try:
+        return shutil.disk_usage(path).free / 1e9
+    except OSError:
+        return None
+
+
+def sys_line(info):
+    """The SYS line for the printer's screen (System page). '-' = not known."""
+    def f(v, fmt):
+        return "-" if v is None else fmt.format(v)
+    return (f"SYS ip={info.get('ip') or '-'} wifi={f(info.get('wifi'), '{:d}')} temp={f(info.get('temp'), '{:.0f}')} "
+            f"sd={f(info.get('sd_free_gb'), '{:.1f}')} usb={f(info.get('usb_free_gb'), '{:.1f}')} "
+            f"prints={f(info.get('prints'), '{:d}')} proj={f(info.get('projector_h'), '{:.1f}')} "
+            f"hdmi={f(None if info.get('hdmi') is None else int(bool(info['hdmi'])), '{:d}')}")
+
+
+# =============================================================================== the part's silhouette
+# The printer's screen draws the part inside the progress ring (SHAPE lines). It comes from the .spin
+# preview (preview.png): its background goes (transparent pixels, or the colour of its corners), the
+# empty edges are cut and what is left is fitted into SHAPE_SIZE x SHAPE_SIZE pixels, 1 bit each.
+SHAPE_SIZE = 56
+SHAPE_SRC = 128  # ffmpeg scales the preview to this first (kept in proportion, padded)
+
+
+def shape_mask(rgba, w, h):
+    """Which pixels belong to the part: list of rows of bools."""
+    px = [rgba[i:i + 4] for i in range(0, w * h * 4, 4)]
+    if any(p[3] < 250 for p in px):  # a transparent background
+        return [[px[y * w + x][3] > 128 for x in range(w)] for y in range(h)]
+    corners = [px[0], px[w - 1], px[(h - 1) * w], px[h * w - 1]]
+    bg = [sum(c[i] for c in corners) / 4 for i in range(3)]
+    return [[sum(abs(px[y * w + x][i] - bg[i]) for i in range(3)) > 60 for x in range(w)] for y in range(h)]
+
+
+def shape_lines(mask, size=SHAPE_SIZE):
+    """The SHAPE lines for the screen, or None (nothing, or everything, is the part)."""
+    h, w = len(mask), len(mask[0]) if mask else 0
+    ys = [y for y in range(h) if any(mask[y])]
+    xs = [x for x in range(w) if any(mask[y][x] for y in range(h))]
+    if not ys or not xs:
+        return None
+    y0, y1, x0, x1 = ys[0], ys[-1] + 1, xs[0], xs[-1] + 1
+    bw, bh = x1 - x0, y1 - y0
+    if bw * bh >= w * h * 0.98 and bw == w:  # no background found: not a silhouette
+        return None
+    k = max(bw, bh) / size  # source pixels per screen pixel, the same both ways
+    ow, oh = max(1, round(bw / k)), max(1, round(bh / k))
+    ox, oy = (size - ow) // 2, (size - oh) // 2
+    bpr = (size + 7) // 8
+    rows = [bytearray(bpr) for _ in range(size)]
+    for ty in range(oh):
+        for tx in range(ow):
+            sx0, sy0 = x0 + int(tx * k), y0 + int(ty * k)
+            sx1, sy1 = max(sx0 + 1, x0 + int((tx + 1) * k)), max(sy0 + 1, y0 + int((ty + 1) * k))
+            cells = [mask[y][x] for y in range(sy0, min(sy1, y1)) for x in range(sx0, min(sx1, x1))]
+            if cells and sum(cells) >= 0.35 * len(cells):
+                X, Y = ox + tx, oy + ty
+                rows[Y][X >> 3] |= 0x80 >> (X & 7)
+    out = [f"SHAPE BEGIN {size} {size}"]
+    for y in range(0, size, 8):
+        out.append(f"SHAPE {y} " + "".join(rows[r].hex().upper() for r in range(y, min(y + 8, size))))
+    out.append("SHAPE END")
+    return out
+
+
+def part_shape(png, size=SHAPE_SIZE):
+    """SHAPE lines from a preview image (ffmpeg decodes it), or None."""
+    if not png or not os.path.exists(png):
+        return None
+    vf = (f"scale={SHAPE_SRC}:{SHAPE_SRC}:force_original_aspect_ratio=decrease,"
+          f"pad={SHAPE_SRC}:{SHAPE_SRC}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=rgba")
+    try:
+        r = subprocess.run(["ffmpeg", "-v", "error", "-i", png, "-vf", vf, "-frames:v", "1", "-f", "rawvideo",
+                            "-pix_fmt", "rgba", "-"], capture_output=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0 or len(r.stdout) < SHAPE_SRC * SHAPE_SRC * 4:
+        return None
+    return shape_lines(shape_mask(r.stdout[:SHAPE_SRC * SHAPE_SRC * 4], SHAPE_SRC, SHAPE_SRC), size)
+
+
+# =============================================================================== the board's firmware
+# A firmware for the board comes from a USB stick (any spinscreen*.bin: your own build) or from a
+# GitHub release (Settings → System → "Check for updates" downloads it). It goes on only if it fits
+# the board's wiring:
+#  * a release build (SPINBUILD release, 0.8.5 on) takes the wiring the board keeps in its flash, so
+#    it fits every board that keeps one (its PINS answer ends with "nvs");
+#  * any other build has its pins compiled in: it must have exactly the board's pins.
+# Only the app part is written (at 0x10000): the board's flash keeps its settings and its wiring.
+REPO = os.environ.get("SPINPRINTER_REPO", "v0xeII/SpinPrinter")
+APP_OFFSET = 0x10000
+
+
+def esp_image_len(data):
+    """Length of an ESP32 app image at the start of data (header, segments, checksum, SHA-256), or None."""
+    if len(data) < 24 or data[0] != 0xE9:
+        return None
+    off = 24
+    for _ in range(data[1]):
+        if off + 8 > len(data):
+            return None
+        seg_len = int.from_bytes(data[off + 4:off + 8], "little")
+        off += 8 + seg_len
+    off += 16 - off % 16  # padding, the checksum in the last byte of the 16-byte block
+    if data[23] == 1:  # hash appended
+        off += 32
+    return off if off <= len(data) else None
+
+
+def firmware_info(path, source):
+    """What a firmware file says about itself: version, wiring, build kind, and its app part."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(16 << 20)
+    except OSError:
+        return None
+    m = re.search(rb"PONG SpinScreen ([0-9][0-9A-Za-z.+\-]*)", data)
+    if not m:
+        return None  # not a SpinScreen firmware
+    pins = re.search(rb"SPINPINS ([0-9,]+)\x00", data)  # the compiled-in pins (not "SPINPINS %s nvs")
+    build = re.search(rb"SPINBUILD (\w+)\x00", data)
+    merged = len(data) > APP_OFFSET + 24 and data[0x8000:0x8002] == b"\xaa\x50"  # a partition table at 0x8000
+    app = data[APP_OFFSET:] if merged else data
+    n = esp_image_len(app)
+    return {"path": path, "source": source, "version": m.group(1).decode(), "merged": merged,
+            "pins": pins.group(1).decode().strip() if pins else None,
+            "build": build.group(1).decode() if build else "local",
+            "app_offset": APP_OFFSET if merged else 0, "app_len": n, "size": len(data)}
+
+
+def firmware_fits(f, esp_pins, esp_nvs):
+    """True when f can go onto a board with this wiring (see above)."""
+    if not f or not esp_pins:
+        return False
+    if f.get("build") == "release" and esp_nvs:
+        return True
+    return f.get("pins") == esp_pins
+
+
+def firmware_files(usb_dirs):
+    """The SpinScreen firmwares on the USB sticks (top folder, named spinscreen*.bin)."""
+    out = []
+    for d in usb_dirs:
+        for p in sorted(glob.glob(os.path.join(d, "*.bin"))):
+            if "spinscreen" in os.path.basename(p).lower():
+                out.append(firmware_info(p, "usb"))
+    return [i for i in out if i]
+
+
+def pick_firmware(files, esp_version, esp_pins, esp_nvs=False):
+    """The stick firmware to offer on the screen, or None: one that fits the board and is another
+    version than the board's (you put it there on purpose)."""
+    if not esp_version:
+        return None
+    for f in files:
+        if firmware_fits(f, esp_pins, esp_nvs) and f["version"] != esp_version:
+            return f
+    return None
+
+
+def esptool_cmd():
+    for exe in ("esptool", "esptool.py"):
+        p = shutil.which(exe)
+        if p:
+            return [p]
+    try:
+        import importlib.util
+        if importlib.util.find_spec("esptool"):
+            return [sys.executable, "-m", "esptool"]
+    except (ImportError, ValueError):
+        pass
+    return None
+
+
+def flash_firmware(fw, port, timeout=240):
+    """Write the app part of fw (firmware_info) at 0x10000 of the ESP32-S3 on port. Returns (ok, message)."""
+    cmd = esptool_cmd()
+    if not cmd:
+        return False, "нет esptool: sudo apt install esptool"
+    if not fw.get("app_len"):
+        return False, "файл не похож на прошивку ESP32"
+    with open(fw["path"], "rb") as fh:
+        fh.seek(fw["app_offset"])
+        app = fh.read(fw["app_len"])
+    import tempfile
+    tmp = os.path.join(tempfile.gettempdir(), f"spinscreen-app-{os.getpid()}.bin")
+    with open(tmp, "wb") as fh:
+        fh.write(app)
+    args = cmd + ["--chip", "esp32s3", "--port", port, "--baud", "460800", "--before", "default_reset",
+                  "--after", "hard_reset", "write_flash", hex(APP_OFFSET), tmp]
+    log("firmware:", " ".join(args))
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, f"esptool: {e}"
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    out = (r.stdout + r.stderr).strip()
+    log("esptool:", out[-600:])
+    if r.returncode != 0:
+        return False, (out.splitlines() or ["esptool failed"])[-1][:120]
+    return True, "ok"
+
+
+# ---- updates over the air: what GitHub has
+def latest_release(timeout=15):
+    """The tag of the latest release (github.com/<repo>/releases/latest redirects to .../tag/<tag>)."""
+    import urllib.request
+    req = urllib.request.Request(f"https://github.com/{REPO}/releases/latest", method="HEAD",
+                                 headers={"User-Agent": "SpinPi"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        url = r.geturl()
+    if "/releases/tag/" not in url:
+        raise OSError("на GitHub нет релиза")
+    return urllib.parse.unquote(url.rsplit("/releases/tag/", 1)[1])
+
+
+def download(url, dst, timeout=60):
+    import urllib.request
+    tmp = dst + ".part"
+    req = urllib.request.Request(url, headers={"User-Agent": "SpinPi"})
+    with urllib.request.urlopen(req, timeout=timeout) as r, open(tmp, "wb") as fh:
+        shutil.copyfileobj(r, fh)
+    os.replace(tmp, dst)
+    return dst
+
+
+def release_firmware_url(tag):
+    return f"https://github.com/{REPO}/releases/download/{tag}/spinscreen-{tag}-merged.bin"
+
+
+def raspberry_update_cmd(tag):
+    """Runs the release's get.sh outside the spinpi service (its install restarts spinpi), no reboot."""
+    script = (f"curl -fsSL https://raw.githubusercontent.com/{REPO}/{tag}/SpinPi/get.sh | "
+              f"SPINPRINTER_REF={tag} SPINPRINTER_NO_REBOOT=1 bash >/var/log/spinprinter-update.log 2>&1")
+    return ["systemd-run", "--unit=spinprinter-update", "--collect", "--quiet", "/bin/bash", "-c", script]
 
 
 # =============================================================================== mDNS (avahi)
@@ -2085,7 +2585,8 @@ def main():
             host = socket.gethostname()
             url = f"http://{ip}" if args.port == 80 else f"http://{ip}:{args.port}"
             s = app.printer.settings
-            g = [f"URL {url}", f"HOST {host}.local", f"NET {wifi_name()}", f"CAL {s['offset_px']} {s['vial_px']}"]
+            g = [f"URL {url}", f"HOST {host}.local", f"NET {wifi_name()}", f"CAL {s['offset_px']} {s['vial_px']}",
+                 "UPD IDLE"]  # a fresh SpinPi: the screen's "Updating the Raspberry…" is over
             if g != app.esp.greeting:
                 app.esp.greeting = g
                 app.esp.hello()
@@ -2094,6 +2595,28 @@ def main():
             time.sleep(15)
 
     threading.Thread(target=refresh_greeting, daemon=True).start()
+
+    def system_loop():
+        """Every 10 s: counters, the System page's facts (SYS) and the firmware on offer (FW)."""
+        while True:
+            pr = app.printer
+            try:
+                pr.tick_counters()
+                if app.esp.connected and pr.update_done:  # how the update before this start went
+                    ok = version_tuple(pr.update_done) == version_tuple(VERSION)
+                    app.esp.send(f"MSG Raspberry обновлена: {VERSION}" if ok else "MSG Raspberry не обновилась")
+                    pr.update_done = None
+                if app.esp.connected and not pr.busy():  # nothing extra on the wire during a print
+                    if app.esp.pins is None and app.esp.pins_asked != app.esp.version:
+                        app.esp.pins_asked = app.esp.version
+                        app.esp.send("PINS")  # firmware before 0.8.5 answers "ERR unknown command"
+                    app.esp.send(sys_line(pr.system_info()))
+                    pr.refresh_firmware()
+            except Exception as e:  # noqa: BLE001 - a broken sensor must not stop the rest
+                log("system info:", e)
+            time.sleep(10)
+
+    threading.Thread(target=system_loop, daemon=True).start()
     Handler.app = app
     srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     srv.daemon_threads = True
