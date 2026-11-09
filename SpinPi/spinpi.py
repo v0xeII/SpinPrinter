@@ -39,7 +39,7 @@ except ImportError:  # still serve the web page without the ESP
     serial = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "0.8.5"
+VERSION = "0.8.6"
 VIDEO_EXT = (".mp4", ".mkv", ".mov", ".avi", ".webm")
 SPIN_EXT = ".spin"  # SpinSlicer's one-file print: a stored ZIP with spin.json, video.mp4, preview.png
 PRINT_EXT = VIDEO_EXT + (SPIN_EXT,)
@@ -108,6 +108,10 @@ class Lines:
             else:
                 self.junk = True
         return out
+
+
+PONG_RE = re.compile(r"PONG SpinScreen ([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][0-9A-Za-z.]+)?)$")
+PINS_RE = re.compile(r"SPINPINS ([0-9]+(?:,[0-9]+)+)( nvs)?$")
 
 
 class Esp:
@@ -247,14 +251,20 @@ class Esp:
                 self.hello()  # the greeting may have gone to a port that was not listening yet
             self.connected = True
             self.last_pong = time.monotonic()
-            v = line.split()[-1]
-            if v != getattr(self, "version", ""):  # another firmware: its wiring has to be asked again
-                self.pins = self.pins_asked = None
-            self.version = v
+            # Only a whole answer says the version. Boards up to 0.8.5 lose the end of a line now and
+            # then (the USB driver), and "PONG SpinScreOK" taken as the version made the update check
+            # see no firmware, or ask for the wiring again in the middle of it.
+            m = PONG_RE.match(line)
+            if m:
+                v = m.group(1)
+                if v != getattr(self, "version", ""):  # another firmware: its wiring has to be asked again
+                    self.pins = self.pins_asked = None
+                self.version = v
         elif line.startswith("SPINPINS "):
-            p = line[9:].split()
-            self.pins = p[0] if p else None
-            self.nvs = "nvs" in p[1:]
+            m = PINS_RE.match(line)  # a cut line must not become the board's wiring
+            if m:
+                self.pins = m.group(1)
+                self.nvs = bool(m.group(2))
         elif line.startswith("READY"):  # ESP rebooted
             self.hello()
         elif line.startswith("EV "):
@@ -1602,6 +1612,16 @@ class Printer:
                     self.esp.send(f"UPD STEP Скачиваю прошивку {ver}…")
                     (fetch or download)(release_firmware_url(tag), path)
                 info = firmware_info(path, "release")
+                if not info or not info.get("app_len"):  # a broken file (cut download): fetch it again
+                    os.remove(path)
+                    self.esp.send(f"UPD STEP Скачиваю прошивку {ver}…")
+                    (fetch or download)(release_firmware_url(tag), path)
+                    info = firmware_info(path, "release")
+                if self.esp.pins is None:  # not known yet: ask now rather than say "does not fit"
+                    self.esp.send("PINS")
+                    end = time.monotonic() + 3
+                    while self.esp.pins is None and time.monotonic() < end:
+                        time.sleep(0.1)
                 if firmware_fits(info, self.esp.pins, self.esp.nvs):
                     fw = info
                 else:
@@ -2607,9 +2627,9 @@ def main():
                     app.esp.send(f"MSG Raspberry обновлена: {VERSION}" if ok else "MSG Raspberry не обновилась")
                     pr.update_done = None
                 if app.esp.connected and not pr.busy():  # nothing extra on the wire during a print
-                    if app.esp.pins is None and app.esp.pins_asked != app.esp.version:
+                    if app.esp.pins is None and app.esp.version:
                         app.esp.pins_asked = app.esp.version
-                        app.esp.send("PINS")  # firmware before 0.8.5 answers "ERR unknown command"
+                        app.esp.send("PINS")  # until it answers; firmware before 0.8.5: "ERR unknown command"
                     app.esp.send(sys_line(pr.system_info()))
                     pr.refresh_firmware()
             except Exception as e:  # noqa: BLE001 - a broken sensor must not stop the rest

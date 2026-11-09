@@ -888,6 +888,25 @@ class SystemPage(Tmp):
         esp.on_line("PONG SpinScreen 0.8.6")  # another firmware: ask again
         self.assertIsNone(esp.pins)
 
+    def test_cut_lines_change_nothing(self):
+        # boards up to 0.8.5 lose the end of a line now and then; the next line ("OK") sticks to it.
+        # Seen on a real printer: a quarter of the PONGs read "PONG SpinScreOK", "PONG SpinScreen 0.8.OK"...
+        esp = spinpi.Esp.__new__(spinpi.Esp)
+        esp.pos_cv, esp.pos, esp.connected, esp.greeting = threading.Condition(), None, True, []
+        esp.on_event, esp.port, esp.ser, esp.lock = (lambda ev: None), "/dev/ttyACM0", None, threading.Lock()
+        esp.version, esp.pins, esp.pins_asked, esp.nvs = "", None, None, False
+        esp.on_line("PONG SpinScreen 0.8.4")
+        esp.on_line("SPINPINS " + MINE + " nvs")
+        for bad in ("PONG SpinScreOK", "PONG SpinScreen 0.8.OK", "PONG SpinScreen 0.8.4OK", "PONG OK", "PONGOK"):
+            esp.last_pong = 0
+            esp.on_line(bad)
+            self.assertEqual(esp.version, "0.8.4", bad)
+            self.assertGreater(esp.last_pong, 0, "still a sign of life")
+        self.assertEqual((esp.pins, esp.nvs), (MINE, True), "a cut PONG must not make the wiring unknown")
+        for bad in ("SPINPINS 43,44OK", "SPINPINS " + MINE + " nvsOK", "SPINPINS OK"):
+            esp.on_line(bad)
+            self.assertEqual((esp.pins, esp.nvs), (MINE, True), bad)
+
 
 class OverTheAir(Tmp):
     """Settings → System → "Check for updates" → "Update to …": GitHub is faked."""
@@ -946,6 +965,30 @@ class OverTheAir(Tmp):
         self.assertIsNone(self.pr.update["fw"])  # the board does not
         self.esp.version = "0.9.0"  # board already new, Raspberry too: nothing
         self.pr.update = None
+
+    def test_wiring_asked_when_unknown(self):
+        # the answer to PINS got lost: the check asks again instead of saying "does not fit"
+        self.esp.pins, self.esp.nvs = None, False
+        send = self.esp.send
+
+        def answer(line):
+            send(line)
+            if line == "PINS":
+                self.esp.pins, self.esp.nvs = MINE, True
+        self.esp.send = answer
+        self.pr.check_updates(latest=lambda: "v0.9.0", fetch=self.fetch())
+        self.assertIn("PINS", self.esp.sent)
+        self.assertEqual(self.esp.sent[-1], "UPD AVAIL 0.9.0")
+        self.assertTrue(self.pr.update["fw"])
+
+    def test_broken_download_fetched_again(self):
+        path = os.path.join(self.pr.data, "fw", "spinscreen-v0.9.0-merged.bin")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(b"half a file")  # a download cut short
+        self.pr.check_updates(latest=lambda: "v0.9.0", fetch=self.fetch())
+        self.assertEqual(self.downloads, [spinpi.release_firmware_url("v0.9.0")])
+        self.assertTrue(self.pr.update["fw"])
 
     def test_firmware_only(self):
         self.pr.check_updates(latest=lambda: "v" + spinpi.VERSION, fetch=self.fetch())

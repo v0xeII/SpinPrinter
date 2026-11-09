@@ -1065,8 +1065,9 @@ void ui_line(const char* line, uint32_t nowMs) {
   } else if (!strncmp(line, "UPD ", 4)) {  // CHECKING · NONE · AVAIL <ver> · ERR <text> · RUN pi · IDLE
     const char* a = line + 4;
     updRun = false;
-    if (!strncmp(a, "CHECKING", 8)) updState = UPD_CHECKING;
-    else if (!strncmp(a, "STEP ", 5)) { if (updState == UPD_CHECKING) say(a + 5, 60); }  // what it does now
+    // every step restarts the 40 s "no answer" clock: a slow download is not a silent Raspberry
+    if (!strncmp(a, "CHECKING", 8)) { updState = UPD_CHECKING; updT = now; }
+    else if (!strncmp(a, "STEP ", 5)) { if (updState == UPD_CHECKING) { updT = now; say(a + 5, 60); } }
     else if (!strncmp(a, "NONE", 4)) { updState = UPD_NONE; say(T(S_UPD_LATEST), 3); mood(MOOD_HAPPY, 1); }
     else if (!strncmp(a, "AVAIL ", 6)) {
       updState = UPD_AVAIL;

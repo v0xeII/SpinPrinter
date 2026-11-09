@@ -38,13 +38,48 @@ static char rxBuf[160];  // = Line::s: a longer line is dropped, never cut
 static int rxN = 0;
 static bool rxJunk = false;  // this line had bytes no Pi sends: dropped
 
-// one write() per line, so lines never interleave
+// One line at a time, whole, from the serial task only (so lines never interleave).
+//
+// On the chip's own USB port (HWCDC) a line goes straight into the 64-byte USB buffer here. The
+// core's Serial.write() hands it to an interrupt that copies chunks into that buffer without
+// checking how much fitted: when the buffer had not been picked up yet, the rest of the line was
+// lost. SpinPi saw a quarter of the PONGs as "PONG SpinScreOK", and an "EV UPDATE" cut the same way
+// was a press on the screen that did nothing. Here every byte waits for room instead.
+#if ARDUINO_USB_MODE && ARDUINO_USB_CDC_ON_BOOT
+#include "hal/usb_serial_jtag_ll.h"
+static bool usbStalled = false;  // nobody picks the lines up (SpinPi stopped): drop them, do not wait
+
+static void sendLine(const char* line) {
+  char b[160];
+  int n = snprintf(b, sizeof b - 1, "%s\n", line);
+  if (n > (int)sizeof b - 2) n = sizeof b - 2;
+  const uint8_t* p = (const uint8_t*)b;
+  if (usbStalled && !usb_serial_jtag_ll_txfifo_writable()) return;  // a whole line, not a cut one
+  uint32_t t0 = micros();
+  while (n > 0) {
+    if (usb_serial_jtag_ll_txfifo_writable()) {
+      uint32_t w = usb_serial_jtag_ll_write_txfifo(p, n);
+      usb_serial_jtag_ll_txfifo_flush();  // send it now (one USB packet)
+      p += w;
+      n -= (int)w;
+      usbStalled = false;
+      t0 = micros();
+    } else if (micros() - t0 > 20000) {  // the computer takes a packet every 1 ms when it reads
+      usbStalled = true;
+      return;
+    } else {
+      delayMicroseconds(20);
+    }
+  }
+}
+#else
 static void sendLine(const char* line) {
   char b[160];
   int n = snprintf(b, sizeof b - 1, "%s\n", line);
   if (n > (int)sizeof b - 2) n = sizeof b - 2;
   Serial.write((const uint8_t*)b, n);
 }
+#endif
 // Lines from the UI go out through the serial task. A USB write can block for ~100 ms when the
 // computer at the other end is not reading (port not opened); in the UI loop that froze the
 // screen and made Spinny jump. Queued, the UI never waits: if nobody reads, lines are dropped.
@@ -193,8 +228,9 @@ void setup() {
   }
   // the serial task runs either way: without a screen the Pi still hears why
   xTaskCreatePinnedToCore(serialTask, "serial", 6144, nullptr, 5, nullptr, 0);
-  sendLine(haveScreen ? "READY SpinScreen " FW_VERSION " st7789_240x320 320x240 joystick"
-                      : "READY SpinScreen " FW_VERSION " st7789_240x320 320x240 joystick noscreen");
+  // through the serial task: it is the only one that writes to the port
+  hSend(haveScreen ? "READY SpinScreen " FW_VERSION " st7789_240x320 320x240 joystick"
+                   : "READY SpinScreen " FW_VERSION " st7789_240x320 320x240 joystick noscreen");
 }
 
 void loop() {
