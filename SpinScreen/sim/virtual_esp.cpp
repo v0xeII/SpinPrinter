@@ -8,7 +8,8 @@
 //        FAULT freeze|reset|ok  ESP stops answering / reboots / back to normal
 //        anything else          sent to the Pi as is (e.g. EV PRINT 0 2 0 1)
 //
-// Keys in the window: ↑ ↓, Enter/Space = OK, Esc/Backspace = long OK (back),
+// The window shows the printer's screen only (--panel: with round buttons and a debug panel).
+// Keys in the window: ↑ ↓, → / Enter / Space = OK, ← / Esc / Backspace = back,
 //                     F = freeze the ESP, R = reboot it.
 #include <errno.h>
 #include <fcntl.h>
@@ -318,7 +319,7 @@ static void drawChrome(Canvas& c, int sx, int sy, int sw, int sh, Btn* b, int nb
       y += 19;
     }
   }
-  c.text(F_SM, px + 18, H - 62, TR("↑ ↓  Enter = OK   Esc = назад", "↑ ↓  Enter = OK   Esc = back"), DIM);
+  c.text(F_SM, px + 18, H - 62, TR("↑ ↓   → Enter = OK   ← Esc = назад", "↑ ↓   → Enter = OK   ← Esc = back"), DIM);
   c.text(F_SM, px + 18, H - 40, TR("F = ESP завис   R = перезагрузка", "F = freeze ESP   R = reboot"), DIM);
   (void)t;
 }
@@ -349,18 +350,20 @@ int main(int argc, char** argv) {
   const int W = 320, H = 240;
   int scale = 3;
   bool headless = false;
+  bool panel = false;  // the window shows the screen only; --panel: with buttons and the debug panel
   std::string inject, link, shot;
   double shotAt = 5;
   for (int i = 1; i < argc; i++) {
     if (!strncmp(argv[i], "--scale=", 8)) scale = atoi(argv[i] + 8);
     else if (!strcmp(argv[i], "--headless")) headless = true;
+    else if (!strcmp(argv[i], "--panel")) panel = true;
     else if (!strcmp(argv[i], "--lang=en")) { EN = true; S0.lang = 1; }
     else if (!strcmp(argv[i], "--inject") && i + 1 < argc) inject = argv[++i];
     else if (!strcmp(argv[i], "--link") && i + 1 < argc) link = argv[++i];
     else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
     else if (!strcmp(argv[i], "--shot-at") && i + 1 < argc) shotAt = atof(argv[++i]);
     else {
-      fprintf(stderr, "usage: virtual_esp [--scale=3] [--headless] [--lang=en] [--inject FILE] [--link PATH] [--shot FILE --shot-at S]\n");
+      fprintf(stderr, "usage: virtual_esp [--scale=3] [--panel] [--headless] [--lang=en] [--inject FILE] [--link PATH] [--shot FILE --shot-at S]\n");
       return 2;
     }
   }
@@ -414,10 +417,12 @@ int main(int argc, char** argv) {
   SDL_Texture *scr = nullptr, *chrome = nullptr;
   if (!headless) {
     if (SDL_Init(SDL_INIT_VIDEO)) { fprintf(stderr, "sdl: %s (use --headless)\n", SDL_GetError()); return 1; }
-    win = SDL_CreateWindow("SpinScreen: виртуальный ESP32", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WW, WH,
-                           SDL_WINDOW_ALLOW_HIGHDPI);
+    // the screen alone, like the printer's: the debug panel and the round buttons only with --panel
+    int winW = panel ? WW : sw, winH = panel ? WH : sh;
+    win = SDL_CreateWindow(panel ? "SpinScreen: виртуальный ESP32" : "SpinPrinter: экран", SDL_WINDOWPOS_UNDEFINED,
+                           SDL_WINDOWPOS_UNDEFINED, winW, winH, SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE);
     ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    SDL_RenderSetLogicalSize(ren, WW, WH);
+    SDL_RenderSetLogicalSize(ren, winW, winH);
     scr = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STREAMING, W, H);
     chrome = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STREAMING, WW, WH);
   }
@@ -457,16 +462,17 @@ int main(int argc, char** argv) {
         if (e.type == SDL_QUIT) return 0;
         if (e.type == SDL_KEYDOWN && !e.key.repeat) {
           switch (e.key.keysym.sym) {
+            // the arrows are the joystick: ↑ ↓ through the list, → = OK, ← = back
             case SDLK_UP: press(K_UP); break;
             case SDLK_DOWN: press(K_DOWN); break;
-            case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: press(K_OK); break;
-            case SDLK_ESCAPE: case SDLK_BACKSPACE: press(K_BACK); break;
+            case SDLK_RIGHT: case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: press(K_OK); break;
+            case SDLK_LEFT: case SDLK_ESCAPE: case SDLK_BACKSPACE: press(K_BACK); break;
             case SDLK_f: frozen = !frozen; break;
             case SDLK_r: frozen = false; reboot(ms); break;
             default: break;
           }
         }
-        if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) {
+        if (panel && (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP)) {
           for (auto& b : btn) {
             float dx = e.button.x - b.x, dy = e.button.y - b.y;
             if (dx * dx + dy * dy > (b.r + 6) * (b.r + 6)) continue;
@@ -496,9 +502,13 @@ int main(int argc, char** argv) {
       SDL_UpdateTexture(scr, nullptr, fb.data(), W * 2);
       Uint8 v = (Uint8)(60 + brightness * 195 / 100);
       SDL_SetTextureColorMod(scr, v, v, v);
-      SDL_RenderCopy(ren, chrome, nullptr, nullptr);
-      SDL_Rect d = {sx, sy, sw, sh};
-      SDL_RenderCopy(ren, scr, nullptr, &d);
+      if (panel) {
+        SDL_RenderCopy(ren, chrome, nullptr, nullptr);
+        SDL_Rect d = {sx, sy, sw, sh};
+        SDL_RenderCopy(ren, scr, nullptr, &d);
+      } else {
+        SDL_RenderCopy(ren, scr, nullptr, nullptr);
+      }
       SDL_RenderPresent(ren);
     }
 #endif
