@@ -12,6 +12,13 @@
 #include "motor.h"
 #include "ui.h"
 
+// The Raspberry talks to the board over the chip's own USB port. Without "USB CDC On Boot" Serial is
+// UART0, on GPIO 43 / 44: the screen's SCL / SDA. The screen and the link would both be dead with no
+// word why, so such a build stops here instead.
+#if !ARDUINO_USB_CDC_ON_BOOT
+#error "Arduino IDE: Tools -> USB CDC On Boot -> Enabled (arduino-cli: --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc)"
+#endif
+
 // the UI runs in loop(); give it room (default is 8 KB)
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 
@@ -48,6 +55,16 @@ static MotorConfig toMotor(const Settings& s) {
   return MotorConfig{s.stepsRev, s.micro, s.gear, s.accel, s.dirInv != 0};
 }
 // The Pi is on the USB cable.
+// A line and its "\n" into b. A line too long for b is cut, but it always ends with "\n": without
+// it the Raspberry would read it glued to the next line.
+static int lineOut(char* b, size_t size, const char* line) {
+  int n = snprintf(b, size - 1, "%s", line);
+  if (n < 0) n = 0;
+  if (n > (int)size - 2) n = (int)size - 2;
+  b[n++] = '\n';
+  b[n] = 0;
+  return n;
+}
 static char rxBuf[160];  // = Line::s: a longer line is dropped, never cut
 static int rxN = 0;
 static bool rxJunk = false;  // this line had bytes no Pi sends: dropped
@@ -65,8 +82,7 @@ static bool usbStalled = false;  // nobody picks the lines up (SpinPi stopped): 
 
 static void sendLine(const char* line) {
   char b[160];
-  int n = snprintf(b, sizeof b - 1, "%s\n", line);
-  if (n > (int)sizeof b - 2) n = sizeof b - 2;
+  int n = lineOut(b, sizeof b, line);
   const uint8_t* p = (const uint8_t*)b;
   if (usbStalled && !usb_serial_jtag_ll_txfifo_writable()) return;  // a whole line, not a cut one
   uint32_t t0 = micros();
@@ -89,8 +105,7 @@ static void sendLine(const char* line) {
 #else
 static void sendLine(const char* line) {
   char b[160];
-  int n = snprintf(b, sizeof b - 1, "%s\n", line);
-  if (n > (int)sizeof b - 2) n = sizeof b - 2;
+  int n = lineOut(b, sizeof b, line);
   Serial.write((const uint8_t*)b, n);
 }
 #endif
@@ -102,7 +117,12 @@ struct Line;
 static void hSend(const char* line);
 static void hSpin(bool on, float rpm) { motor_set(on, rpm); }
 static void hBright(int pct) { display_backlight(pct); }
-static void hSave(const Settings& s) {
+// Settings go to flash only while the motor stands still. A flash write stops the chip's cache,
+// and with it the step interrupt (it is not in IRAM in the Arduino core): a turning vial jerked.
+// A change made while it turns is kept here and written as soon as it stops.
+static Settings pendingSave;
+static bool savePending = false;
+static void writeSettings(const Settings& s) {
   prefs.putFloat("rpm", s.rpm);
   prefs.putUChar("lang", s.lang);
   prefs.putUChar("bright", s.bright);
@@ -120,6 +140,11 @@ static void hSave(const Settings& s) {
   prefs.putUChar("sound", s.sound);
   prefs.putUChar("clicks", s.clicks);
   prefs.putUChar("buzz", s.buzzPin < 0 ? 255 : s.buzzPin);
+}
+static void hSave(const Settings& s) {  // from the UI loop only
+  pendingSave = s;
+  savePending = motor_rpm() != 0;
+  if (!savePending) writeSettings(s);
 }
 static float hRpm() { return motor_rpm(); }
 static double hAngle() { return motor_angle(); }
@@ -227,7 +252,8 @@ void setup() {
   if (!(s.rpm >= RPM_MIN && s.rpm <= RPM_MAX)) s.rpm = RPM_DEFAULT;
   if (s.lang > 1) s.lang = 0;
   if (s.bright < 10 || s.bright > 100) s.bright = 80;
-  if (s.micro < 1 || s.micro > 256 || (s.micro & (s.micro - 1))) s.micro = MOTOR_MICROSTEPS;
+  // TMC2209 on STEP/DIR (MS1 / MS2 jumpers) knows 1/8, 1/16, 1/32 and 1/64 only
+  if (s.micro != 8 && s.micro != 16 && s.micro != 32 && s.micro != 64) s.micro = MOTOR_MICROSTEPS;
   if (s.stepsRev != 200 && s.stepsRev != 400) s.stepsRev = MOTOR_STEPS_PER_REV;
   if (!(s.accel >= 1 && s.accel <= 60)) s.accel = MOTOR_ACCEL_RPM_S;
   if (!(s.gear >= 0.1f && s.gear <= 50.f)) s.gear = MOTOR_GEAR;
@@ -273,6 +299,10 @@ void loop() {
     }
     delay(20);
     return;
+  }
+  if (savePending && motor_rpm() == 0) {  // the motor has stopped: the settings changed meanwhile
+    savePending = false;
+    writeSettings(pendingSave);
   }
   Line l;
   while (xQueueReceive(lines, &l, 0) == pdTRUE) ui_line(l.s, millis());

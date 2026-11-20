@@ -34,7 +34,7 @@ The faster the Raspberry, the more images per turn it can keep up with.
 No port in the list: the cable only charges, use another one. Flashing fails: hold **BOOT**,
 press and release **RESET**, release BOOT and try again.
 
-**For developers (Linux, Arduino IDE 2 with the esp32 core):** `bash SpinScreen_v0.7/tools/flash.sh`
+**For developers (Linux, Arduino IDE 2 with the esp32 core):** `bash SpinScreen/tools/flash.sh`
 
 ## 2. Set up the Raspberry Pi
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Прошить ESP32-S3 одной командой (Arduino IDE открывать не нужно):
-#     bash SpinScreen_v0.7/tools/flash.sh
+#     bash SpinScreen/tools/flash.sh
 # Плата подключена к компьютеру USB-кабелем. Берёт arduino-cli из Arduino IDE (обычной или flatpak).
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.."

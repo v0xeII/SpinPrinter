@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the firmware and put it, with its manifest, next to the browser flasher (flasher/fw/),
 # to try the flasher page locally (serve flasher/ over https or localhost):
-#     bash SpinScreen_v0.7/tools/update_flasher.sh
+#     bash SpinScreen/tools/update_flasher.sh
 # Nothing here is committed: the published flasher is built by .github/workflows/firmware.yml
 # from the latest release tag (docs/RELEASING.md).
 set -euo pipefail
@@ -15,7 +15,7 @@ B="${TMPDIR:-/tmp}/spinscreen-build"
 # no paths of this computer (user name, folders) may end up inside the published firmware:
 # build a copy from a neutral folder and map the home folder away
 SRC="${TMPDIR:-/tmp}/spinscreen-src"
-rm -rf "$B" "$SRC" && mkdir -p "$SRC" && cp -r SpinScreen_v0.7/SpinScreen "$SRC/"
+rm -rf "$B" "$SRC" && mkdir -p "$SRC" && cp -r SpinScreen/SpinScreen "$SRC/"
 MAP="-ffile-prefix-map=$HOME=/build -ffile-prefix-map=$SRC=/src"
 "$CLI" "${CFG[@]}" compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" --build-path "$B" \
 	--build-property "compiler.c.extra_flags=$MAP" --build-property "compiler.cpp.extra_flags=$MAP" \
@@ -23,7 +23,7 @@ MAP="-ffile-prefix-map=$HOME=/build -ffile-prefix-map=$SRC=/src"
 if strings -n 6 "$B/SpinScreen.ino.bin" | grep -qE "$HOME|$(whoami)"; then
 	echo "the firmware still contains paths of this computer, not copying it"; exit 1
 fi
-VER=$(sed -n 's/#define FW_VERSION "\(.*\)"/\1/p' SpinScreen_v0.7/SpinScreen/config.h)
+VER=$(sed -n 's/#define FW_VERSION "\(.*\)"/\1/p' SpinScreen/SpinScreen/config.h)
 mkdir -p flasher/fw
 cp "$B/SpinScreen.ino.bootloader.bin" flasher/fw/bootloader.bin
 cp "$B/SpinScreen.ino.partitions.bin" flasher/fw/partitions.bin

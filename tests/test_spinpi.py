@@ -823,6 +823,24 @@ class ScreenTalk(Tmp):
         pr.esp.on_hello()  # a restarted board hears all of it again
         self.assertEqual([x for x in pr.esp.sent if x.startswith("ASK")][1:], warn)
 
+    def test_print_from_a_list_never_sent_prints_nothing(self):
+        # SpinPi restarted after the screen got its list: the number means nothing now. It used to
+        # print the last printed file instead.
+        pr, _ = make_printer(self.tmp)
+        pr.settings["last_id"] = "lib/old.spin"
+        started = []
+        pr.start = lambda fid, **kw: started.append(fid)
+        pr.on_esp_event("PRINT 0 5 0 3")
+        pr.on_esp_event("PRINT")
+        pr.on_esp_event("PRINT x y z w")
+        self.assertEqual(started, [])
+        errs = [x for x in pr.esp.sent if x.startswith("STATE ERROR")]
+        self.assertEqual(len(errs), 3)
+        self.assertIn("устарел", errs[0])
+        pr.esp_list = ["lib/a.spin"]
+        pr.on_esp_event("PRINT 0 5 0 3")
+        self.assertEqual(started, ["lib/a.spin"])
+
     def test_a_flip_on_the_screen_flips_the_direction(self):
         pr, _ = make_printer(self.tmp)
         self.assertEqual(pr.motor_dir, "ccw_from_top")

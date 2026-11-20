@@ -16,7 +16,7 @@ import tempfile
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SIM = os.path.join(ROOT, "SpinScreen_v0.7", "sim")
+SIM = os.path.join(ROOT, "SpinScreen", "sim")
 W, H = 320, 170          # the ESP screen
 FPS_IN, STEP = 60, 4     # sim frames per second, keep every 4th: 15 fps
 UNTIL_MS = 24500         # menu -> print -> done -> "how did it come out?"

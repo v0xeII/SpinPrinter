@@ -8,7 +8,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORK = os.path.join(ROOT, "dev", "work")
 SPINPROJ = os.path.join(ROOT, "SpinProj", "spinproj")
-VESP = os.path.join(ROOT, "SpinScreen_v0.7", "sim", "virtual_esp")
+VESP = os.path.join(ROOT, "SpinScreen", "sim", "virtual_esp")
 SPINPI = os.path.join(ROOT, "SpinPi", "spinpi.py")
 
 
@@ -18,7 +18,7 @@ def say(*a):
 
 def build():
     """Compile SpinProj and the virtual ESP32 (make only rebuilds what changed)."""
-    for d, target in (("SpinProj", "spinproj"), (os.path.join("SpinScreen_v0.7", "sim"), "virtual_esp")):
+    for d, target in (("SpinProj", "spinproj"), (os.path.join("SpinScreen", "sim"), "virtual_esp")):
         r = subprocess.run(["make", "-s", "-C", os.path.join(ROOT, d), target], capture_output=True, text=True)
         if r.returncode:
             print(r.stdout + r.stderr)

@@ -13,24 +13,30 @@
 #include "soc/gpio_reg.h"
 
 static const uint32_t TICK_HZ = 10000000;  // timer resolution: 0.1 µs
+// The fastest step rate asked of the driver (two timer interrupts a step). A speed that needs more
+// (a big gear with fine microsteps) is turned at this rate, and motor_rpm() says so honestly.
+static const float MAX_STEP_HZ = 80000.f;
 static gptimer_handle_t gpt;
 static esp_timer_handle_t rampTimer;
 
 static volatile uint64_t halfFP = 0;  // half step period in ticks, 16.16 fixed point; 0 = idle
-static volatile int32_t steps = 0;    // signed step counter (direction applied)
+// signed step counter (direction applied). 64 bits: 32 overflowed after ~9 h of turning at
+// 1/64 microsteps with a 10:1 gear, and the angle the Raspberry syncs to jumped. 64 bits are not
+// atomic on this core, so every read and write outside the interrupt takes the lock.
+static volatile int64_t steps = 0;
 static volatile int dirSign = 1;
 static uint32_t fracAcc = 0;
 static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 static bool level = false;
 static volatile bool moving = false, hitTarget = false;  // motor_move(): stop exactly on a step count
-static volatile int32_t moveTarget = 0;
+static volatile int64_t moveTarget = 0;
 
 static MotorConfig C;
 static volatile float target = 0, current = 0;
 static volatile bool wantOn = false;
 static bool dirState = false;  // current DIR pin level
 
-// pins from hw.h; STEP is toggled by writing the GPIO set / clear register straight from the
+// pins from the board's wiring (board.h); STEP is toggled by writing the GPIO set / clear register straight from the
 // timer interrupt (GPIO 0..31 and 32..48 have a register each)
 static int pinStep = 1, pinDir = 2, pinEn = -1;
 static DRAM_ATTR uint32_t stepSet, stepClr, stepMask;
@@ -81,6 +87,19 @@ static bool IRAM_ATTR onAlarm(gptimer_handle_t t, const gptimer_alarm_event_data
 }
 
 static float microPerVialRev() { return C.stepsPerRev * C.microsteps * C.gear; }
+// the fastest the vial can turn with this driver setup, rpm
+static float maxRpm() { return MAX_STEP_HZ * 60.f / microPerVialRev(); }
+// what the motor really goes to: the wanted speed, within what the step rate allows
+static float effTarget() {
+  float m = maxRpm();
+  return target > m ? m : target;
+}
+static int64_t stepsNow() {
+  portENTER_CRITICAL(&mux);
+  int64_t s = steps;
+  portEXIT_CRITICAL(&mux);
+  return s;
+}
 
 // 5 ms: ramp the speed, handle direction changes and the driver enable pin
 static void ramp(void*) {
@@ -90,9 +109,12 @@ static void ramp(void*) {
     current = 0;
   }
   bool wantDir = C.dirInvert;
-  float tgt = wantOn ? target : 0;
+  float tgt = wantOn ? effTarget() : 0;
   if (moving) {  // brake in time to land on the target step
-    float remaining = (float)abs(moveTarget - steps);
+    portENTER_CRITICAL(&mux);
+    int64_t left = moveTarget - steps;
+    portEXIT_CRITICAL(&mux);
+    float remaining = (float)(left < 0 ? -left : left);
     float aSteps = C.accel / 60.f * microPerVialRev();
     float vMax = sqrtf(2.f * aSteps * remaining) / microPerVialRev() * 60.f;
     if (vMax < 0.3f) vMax = 0.3f;
@@ -116,8 +138,8 @@ static void ramp(void*) {
     return;
   }
   enPin(LOW);
+  if (stepHz > MAX_STEP_HZ) stepHz = MAX_STEP_HZ;
   double half = (double)TICK_HZ / (2.0 * stepHz);
-  if (half < 20) half = 20;  // 250 kHz step limit
   setHalf((uint64_t)(half * 65536.0));
 }
 
@@ -164,7 +186,7 @@ void motor_config(const MotorConfig& cfg) {
   double ang = motor_angle();
   portENTER_CRITICAL(&mux);
   C = cfg;
-  steps = (int32_t)(ang / 360.0 * microPerVialRev());
+  steps = (int64_t)llround(ang / 360.0 * microPerVialRev());
   portEXIT_CRITICAL(&mux);
 }
 
@@ -175,7 +197,10 @@ void motor_set(bool on, float rpm) {
 }
 
 void motor_move(double deg, float rpm) {
-  int32_t n = (int32_t)llround(fabs(deg) / 360.0 * microPerVialRev());
+  int64_t n = llround(fabs(deg) / 360.0 * microPerVialRev());
+  // nothing to turn (0°, or less than half a microstep): a target already reached would never be
+  // hit again, and the motor would turn on for good
+  if (n == 0) return;
   portENTER_CRITICAL(&mux);
   moveTarget = steps + (C.dirInvert ? -1 : 1) * n;  // the direction the motor will turn
   portEXIT_CRITICAL(&mux);
@@ -186,11 +211,11 @@ void motor_move(double deg, float rpm) {
 }
 bool motor_moving() { return moving; }
 float motor_rpm() { return current; }
-bool motor_at_speed() { return wantOn && !moving && fabsf(current - target) < 1e-4f; }
-double motor_angle() { return (double)steps * 360.0 / microPerVialRev(); }
+bool motor_at_speed() { return wantOn && !moving && fabsf(current - effTarget()) < 1e-4f; }
+double motor_angle() { return (double)stepsNow() * 360.0 / microPerVialRev(); }
 void motor_set_angle(double deg) {
   portENTER_CRITICAL(&mux);
-  steps = (int32_t)llround(deg / 360.0 * microPerVialRev());
+  steps = (int64_t)llround(deg / 360.0 * microPerVialRev());
   portEXIT_CRITICAL(&mux);
 }
 

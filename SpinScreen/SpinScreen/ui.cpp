@@ -114,7 +114,8 @@ static const PageDef PAGES[] = {{MAIN_ITEMS, PG_N(MAIN_ITEMS)},     {SETTINGS_IT
                                 {PROJ_ITEMS, PG_N(PROJ_ITEMS)},     {SYSTEM_ITEMS, PG_N(SYSTEM_ITEMS)},
                                 {SOUND_ITEMS, PG_N(SOUND_ITEMS)},   {nullptr, 0}};
 static const Str MORPH_NAME[MORPH_COUNT] = {S_C_PINK, S_C_GOLD, S_C_WILD, S_C_BLACK, S_C_BLUE, S_C_RGB};
-static const int MICRO_OPTS[] = {1, 2, 4, 8, 16, 32, 64, 128, 256};
+// TMC2209 on STEP/DIR: the MS1 / MS2 jumpers give 1/8, 1/16, 1/32 or 1/64, nothing else
+static const int MICRO_OPTS[] = {8, 16, 32, 64};
 static const int STEPS_OPTS[] = {200, 400};
 static const int SLEEP_OPTS[] = {0, 1, 5, 15, 30};  // minutes; 0 = never
 
@@ -258,7 +259,6 @@ static float updT = -100;     // when the check was asked
 static bool updRun = false;   // the Raspberry is updating itself (it restarts on the way)
 static float updRunT = 0;
 
-// first-setup wizard: language, focus, centering, vial width, test spin, done
 // first-setup wizard: language, the links, the projector (focus, centering, vial), the motor
 // (direction, one exact turn, print speed), the screen, then a summary
 enum { WZ_HELLO, WZ_LINK, WZ_FOCUS, WZ_CENTER, WZ_VIAL, WZ_DIR, WZ_TURN, WZ_SPEED, WZ_SCREEN, WZ_DONE, WZ_COUNT };
@@ -279,7 +279,7 @@ static bool shapeOk = false;
 struct Particle { float x, y, vx, vy, r; uint16_t c; };
 static Particle conf[48];
 
-// Rows of the lists. Smaller on the 160x128 screen.
+// Rows of the lists.
 static int ROW_H = 30, PILL_H = 26, ROW_PAD = 13, ROW_TY = 6;  // row pitch, pill height, text inset, baseline
 static const Font* FR = &F_MD;    // row text
 static const Font* FBIG = &F_LG;  // headings
@@ -639,8 +639,19 @@ static void tellPiCfg(bool flipped) {
   sendf("EV CFG DIR %d GEAR %.4f", S.dirInv, (double)S.gear);
 }
 
+// "exactly 1 turn" waits until the vial stands still: started while it still slowed down, the
+// turn was counted from a moving point and the mark never came back to its place
+static bool turnPending = false;
+static void oneTurn() {
+  if (H.motorRpm() > 0) { turnPending = true; return; }
+  turnPending = false;
+  H.motorZero();
+  H.motorMove(360, S.rpm);
+}
+
 static void setMotor(bool on) {
   motorOn = on;
+  if (on) turnPending = false;
   if (!on && cfgPending) { H.motorConfig(S); cfgPending = false; }
   H.spin(on, S.rpm);
   sendf("EV SPIN %d", on ? 1 : 0);
@@ -719,8 +730,8 @@ static void changeValue(ItemId it, int dir) {
       break;
     }
     case I_MICRO: {
-      int i = indexOf(MICRO_OPTS, 9, S.micro) + dir;
-      if (i >= 0 && i < 9) { S.micro = MICRO_OPTS[i]; changed = true; applyMotorCfg(); }
+      int i = indexOf(MICRO_OPTS, PG_N(MICRO_OPTS), S.micro) + dir;
+      if (i >= 0 && i < PG_N(MICRO_OPTS)) { S.micro = MICRO_OPTS[i]; changed = true; applyMotorCfg(); }
       break;
     }
     case I_STEPS: {
@@ -803,6 +814,7 @@ static bool wizNeedsPi(int st) { return st == WZ_FOCUS || st == WZ_CENTER || st 
 static void wizEnter(int st) {
   wizStep = st;
   wizT = now;
+  turnPending = false;
   hop();
   // the projector shows what this step is about, and is dark otherwise
   if (st == WZ_FOCUS) { sendf("EV PATTERN %s", WIZ_PAT[wizPat]); projLit = true; }
@@ -812,7 +824,7 @@ static void wizEnter(int st) {
   // the motor: turning on the direction and speed steps, one exact turn on its own step
   if (st == WZ_DIR || st == WZ_SPEED) { if (!motorOn) setMotor(true); }
   else if (motorOn) setMotor(false);
-  if (st == WZ_TURN) { H.motorZero(); H.motorMove(360, S.rpm); }
+  if (st == WZ_TURN) oneTurn();
 }
 static void startWizard() {
   go(SC_WIZ);
@@ -858,7 +870,7 @@ static void wizKey(Key k) {
         hop();
         break;
       case WZ_TURN:
-        if (k == K_UP) { H.motorZero(); H.motorMove(360, S.rpm); hop(); }
+        if (k == K_UP) { oneTurn(); hop(); }
         else hop(-2);
         break;
       case WZ_SPEED: changeValue(I_SPEED, d); break;
@@ -952,7 +964,7 @@ static void activate() {
     case I_P_CIRCLE: H.send("EV PATTERN circle"); projLit = true; break;
     case I_ROT: setMotor(!motorOn); say(motorOn ? T(S_SPINNING) : T(S_STOPPED)); break;
     case I_DIR: S.dirInv = !S.dirInv; applyMotorCfg(); tellPiCfg(true); H.save(S); say(T(S_SAVED), 1.2f); break;
-    case I_ONEREV: if (motorOn) setMotor(false); H.motorZero(); H.motorMove(360, S.rpm); break;
+    case I_ONEREV: if (motorOn) setMotor(false); oneTurn(); break;
     case I_ZERO: H.motorZero(); say(T(S_ZEROED)); break;
     case I_LANG: S.lang = 1 - S.lang; H.save(S); say(T(S_SAVED), 1.2f); break;
     case I_DARK: S.dark = !S.dark; H.save(S); say(T(S_SAVED), 1.2f); break;
@@ -2379,6 +2391,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   if (S.dark && screen == SC_PRINT) pal::lamp();  // amber on black next to the resin
   else pal::theme(S.theme);
   if (screen == SC_BOOT && now > 2.6f) afterBoot();
+  if (turnPending && H.motorRpm() == 0) oneTurn();  // the vial has stopped: now the exact turn
   if (screen == SC_PRINT && everRx && !piOk()) {  // the Pi vanished mid-print: stop the motor here
     motorOn = false;
     H.spin(false, 0);

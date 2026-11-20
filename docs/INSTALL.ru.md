@@ -35,7 +35,7 @@
 Порта нет в списке — кабель «только для зарядки», возьми другой. Не прошивается — зажми **BOOT**,
 нажми и отпусти **RESET**, отпусти BOOT и попробуй снова.
 
-**Для разработчиков (Linux, Arduino IDE 2 с ядром esp32):** `bash SpinScreen_v0.7/tools/flash.sh`
+**Для разработчиков (Linux, Arduino IDE 2 с ядром esp32):** `bash SpinScreen/tools/flash.sh`
 
 ## 2. Подготовить Raspberry Pi
 

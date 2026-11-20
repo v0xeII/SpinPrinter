@@ -199,4 +199,4 @@ GitHub о последнем релизе (`github.com/<repo>/releases/latest`),
 **Тесты без Raspberry:** `python -m unittest discover tests` (Windows, Mac, Linux; ни ESP, ни ffmpeg не нужны).
 
 `fake_esp.py` притворяется ESP32 (для проверки без железа); строки из файла `inject.txt` он шлёт как нажатия на экране.
-Лучше [виртуальный ESP32](../SpinScreen_v0.7/sim/virtual_esp.cpp): это настоящий интерфейс экрана в окне.
+Лучше [виртуальный ESP32](../SpinScreen/sim/virtual_esp.cpp): это настоящий интерфейс экрана в окне.

@@ -52,7 +52,7 @@ jobs:
             echo "core install failed, retry $i in $((i * 30)) s"; sleep $((i * 30))
           done
       - name: compile
-        run: arduino-cli compile --fqbn "$FQBN" --build-property "compiler.cpp.extra_flags=-DSPIN_RELEASE=1" --build-path build SpinScreen_v0.7/SpinScreen
+        run: arduino-cli compile --fqbn "$FQBN" --build-property "compiler.cpp.extra_flags=-DSPIN_RELEASE=1" --build-path build SpinScreen/SpinScreen
       - name: release files (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -102,7 +102,7 @@ jobs:
             echo "core install failed, retry $i in $((i * 30)) s"; sleep $((i * 30))
           done
       - name: compile ${{ steps.rel.outputs.tag }}
-        run: arduino-cli compile --fqbn "$FQBN" --build-property "compiler.cpp.extra_flags=-DSPIN_RELEASE=1" --build-path build SpinScreen_v0.7/SpinScreen
+        run: arduino-cli compile --fqbn "$FQBN" --build-property "compiler.cpp.extra_flags=-DSPIN_RELEASE=1" --build-path build SpinScreen/SpinScreen
       - name: flasher site (page + wiring + firmware parts + manifest, all from the release)
         run: |
           # served at /flasher/ and, for Actions-mode Pages, at /
@@ -113,7 +113,7 @@ jobs:
           cp build/SpinScreen.ino.partitions.bin site/flasher/fw/partitions.bin
           cp build/SpinScreen.ino.bin site/flasher/fw/spinscreen.bin
           cp "$(find ~/.arduino15/packages/esp32/hardware/esp32 -name boot_app0.bin | head -1)" site/flasher/fw/boot_app0.bin
-          VER=$(sed -n 's/#define FW_VERSION "\(.*\)"/\1/p' SpinScreen_v0.7/SpinScreen/config.h)
+          VER=$(sed -n 's/#define FW_VERSION "\(.*\)"/\1/p' SpinScreen/SpinScreen/config.h)
           sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VER\"/" site/flasher/manifest.json
           python3 -m json.tool site/flasher/manifest.json > /dev/null
           cp -r site/flasher/. site/
