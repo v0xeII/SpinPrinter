@@ -62,10 +62,15 @@ static struct {
 } M;
 static double microPerRev() { return M.stepsRev * M.micro * M.gear; }
 static long long stepsNow() { return (long long)floor(M.pos); }
+static const float MAX_STEP_HZ = 80000.f;  // as motor.cpp: a faster speed turns at this rate
+static float effTarget() {
+  float m = (float)(MAX_STEP_HZ * 60.0 / microPerRev());
+  return M.target > m ? m : M.target;
+}
 
 static void motorTick(double dt) {  // called every 5 ms
   std::lock_guard<std::mutex> g(M.mu);
-  float tgt = M.wantOn ? M.target : 0;
+  float tgt = M.wantOn ? effTarget() : 0;
   if (M.moving) {
     float remaining = (float)llabs(M.moveTarget - stepsNow());
     float aSteps = M.accel / 60.f * microPerRev();
@@ -96,7 +101,7 @@ static double motorAngle() {
   return stepsNow() * 360.0 / microPerRev();
 }
 static float motorRpm() { return M.current; }
-static bool motorAtSpeed() { return M.wantOn && !M.moving && fabsf(M.current - M.target) < 1e-4f; }
+static bool motorAtSpeed() { return M.wantOn && !M.moving && fabsf(M.current - effTarget()) < 1e-4f; }
 
 // ============================================================================ serial over a pty
 static int ptyMaster = -1;
@@ -225,6 +230,7 @@ static void hZero() { std::lock_guard<std::mutex> g(M.mu); M.pos = 0; }
 static void hMove(double deg, float rpm) {
   std::lock_guard<std::mutex> g(M.mu);
   long long n = llround(fabs(deg) / 360.0 * microPerRev());
+  if (n == 0) return;  // as motor.cpp: nothing to turn
   M.moveTarget = stepsNow() + (M.dirInv ? -1 : 1) * n;
   M.moving = true;
   M.target = rpm;

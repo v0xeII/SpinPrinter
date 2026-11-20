@@ -58,7 +58,7 @@
 
 | папка | что это |
 |---|---|
-| [`SpinScreen_v0.7/`](SpinScreen_v0.7/README.md) | прошивка платы (SpinScreen): экран, управление, мотор, протокол с Raspberry |
+| [`SpinScreen/`](SpinScreen/README.md) | прошивка платы (SpinScreen): экран, управление, мотор, протокол с Raspberry |
 | [`SpinPi/`](SpinPi/README.md) | программа на Raspberry Pi (SpinPi): страница принтера, флешки, печать, HTTP API |
 | [`SpinProj/`](SpinProj/README.md) | вывод на проектор (SpinProj): кадр по углу колбы на каждом обновлении экрана |
 | [`flasher/`](flasher/index.html) | страница прошивки и настройки платы (GitHub Pages) |

@@ -39,7 +39,7 @@ except ImportError:  # still serve the web page without the ESP
     serial = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "0.8.8"
+VERSION = "0.8.9"
 VIDEO_EXT = (".mp4", ".mkv", ".mov", ".avi", ".webm")
 SPIN_EXT = ".spin"  # SpinSlicer's one-file print: a stored ZIP with spin.json, video.mp4, preview.png
 PRINT_EXT = VIDEO_EXT + (SPIN_EXT,)
@@ -1688,11 +1688,18 @@ class Printer:
         if p[0] == "LIST":
             self.send_list()
         elif p[0] == "PRINT":
-            if len(p) >= 5 and p[1].isdigit() and int(p[1]) < len(self.esp_list):
-                err = self.start(self.esp_list[int(p[1])], revs=int(float(p[2])), factor=1 + float(p[3]) / 100,
-                                 delay_s=float(p[4]))
+            # EV PRINT <number in the last list sent> <turns> <correction %> <pause s>. A number this
+            # SpinPi never sent (it restarted since the list, or the line came cut) prints nothing:
+            # it used to print the last printed file instead, a part nobody chose.
+            try:
+                i = int(p[1]) if len(p) >= 5 and p[1].isdigit() else -1
+                revs, factor, delay = int(float(p[2])), 1 + float(p[3]) / 100, float(p[4])
+            except (ValueError, IndexError):
+                i = -1
+            if 0 <= i < len(self.esp_list):
+                err = self.start(self.esp_list[i], revs=revs, factor=factor, delay_s=delay)
             else:
-                err = self.start(self.settings.get("last_id") or "")
+                err = "список файлов устарел: открой «Печать» заново"
             if err:
                 self.esp.send(f"STATE ERROR {err}")
         elif p[0] in ("GO", "NO"):

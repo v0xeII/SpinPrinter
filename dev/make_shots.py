@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Screenshots of every SpinScreen screen, drawn by the real UI (SpinScreen_v0.7/sim/shots.cpp).
+"""Screenshots of every SpinScreen screen, drawn by the real UI (SpinScreen/sim/shots.cpp).
 
     python dev/make_shots.py SHOTS_EXE OUT_DIR
 

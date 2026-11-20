@@ -29,7 +29,7 @@ git tag v0.8.2 && git push origin v0.8.2
 3. перезапускает себя на `main`, и страница флешера начинает прошивать `0.8.2`.
 
 Если поменялась распиновка, в том же релизе должны быть `config.h`, `docs/wiring*.svg`,
-`docs/INSTALL*.md` и `SpinScreen_v0.7/README*.md`: флешер показывает схему из того же тега.
+`docs/INSTALL*.md` и `SpinScreen/README*.md`: флешер показывает схему из того же тега.
 
 ## Чего не делать
 
@@ -38,4 +38,4 @@ git tag v0.8.2 && git push origin v0.8.2
   старых коммитах. Если всё же пришлось — перевесить теги на новые коммиты с тем же деревом
   (`git rev-parse <старый>^{tree}` = `git rev-parse <новый>^{tree}`) и `git push --force origin <тег>`.
 - Не коммитить `flasher/fw/*.bin`: их собирает CI. Чтобы попробовать флешер у себя:
-  `bash SpinScreen_v0.7/tools/update_flasher.sh`.
+  `bash SpinScreen/tools/update_flasher.sh`.

@@ -59,7 +59,7 @@ Inside, the printer is a few programs:
 
 | folder | what it is |
 |---|---|
-| [`SpinScreen_v0.7/`](SpinScreen_v0.7/README.en.md) | the board's firmware (SpinScreen): screen, controls, motor, protocol with the Raspberry |
+| [`SpinScreen/`](SpinScreen/README.en.md) | the board's firmware (SpinScreen): screen, controls, motor, protocol with the Raspberry |
 | [`SpinPi/`](SpinPi/README.en.md) | the Raspberry Pi program (SpinPi): printer page, USB sticks, printing, HTTP API |
 | [`SpinProj/`](SpinProj/README.en.md) | projector output (SpinProj): the frame for the vial's angle on every refresh |
 | [`flasher/`](flasher/index.html) | the board's flash and setup page (GitHub Pages) |

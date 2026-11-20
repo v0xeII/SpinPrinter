@@ -17,11 +17,11 @@ VERSION_RE = r"\d+\.\d+\.\d+"
 
 # file -> pattern; group 1 is the version. Every match in the file is checked and replaced.
 PLACES = {
-    "SpinScreen_v0.7/SpinScreen/config.h": rf'#define FW_VERSION "({VERSION_RE})"',
+    "SpinScreen/SpinScreen/config.h": rf'#define FW_VERSION "({VERSION_RE})"',
     "SpinPi/spinpi.py": rf'^VERSION = "({VERSION_RE})"',
     "flasher/manifest.json": rf'"version": "({VERSION_RE})"',
-    "SpinScreen_v0.7/README.md": rf"(?:PONG|READY) SpinScreen ({VERSION_RE})",
-    "SpinScreen_v0.7/README.en.md": rf"(?:PONG|READY) SpinScreen ({VERSION_RE})",
+    "SpinScreen/README.md": rf"(?:PONG|READY) SpinScreen ({VERSION_RE})",
+    "SpinScreen/README.en.md": rf"(?:PONG|READY) SpinScreen ({VERSION_RE})",
 }
 
 

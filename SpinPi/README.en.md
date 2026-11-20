@@ -167,4 +167,4 @@ itself (the installer puts a first copy there). From a PC: `avahi-browse -rt _sp
 
 **Tests without a Raspberry:** `python -m unittest discover tests` (Windows, Mac, Linux; no ESP, no ffmpeg needed).
 
-`fake_esp.py` pretends to be the ESP32; better is the [virtual ESP32](../SpinScreen_v0.7/sim/virtual_esp.cpp), the real screen UI in a window.
+`fake_esp.py` pretends to be the ESP32; better is the [virtual ESP32](../SpinScreen/sim/virtual_esp.cpp), the real screen UI in a window.
