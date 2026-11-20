@@ -13,7 +13,7 @@ Why this beats playing a video (OpenCAL, SpinPi 0.4 with mpv):
 - the video cannot drift from the motor: the frame is chosen by angle, not by time;
 - a missed vsync shifts nothing: the next one shows the right frame again;
 - the light goes off after exactly N turns, to one refresh;
-- no angle for 0.3 s → the light goes off by itself. If SpinPi dies, it goes off too.
+- no angle for 1 s → the light goes off by itself (a lost answer or two is bridged by the prediction). If SpinPi dies, it goes off too.
 
 Before a print one turn of frames is unpacked into RAM: 8-bit gray, LZ4-compressed. Any file
 ffmpeg reads works: MP4 (OpenCAL's too), lossless MKV (FFV1), PNG sequences, lossless H.264 from SpinSlicer.

@@ -41,7 +41,7 @@ Step by step, for Windows, Mac and Linux: **[the guide](docs/INSTALL.md)**. In s
    **Print** → pick the part → **PRINT**.
 3. When it is done, answer "Under / Good / Over": the printer adjusts the exposure for the next one.
 
-The printer's page in a browser: **http://spinslicer.local** (or the QR code: printer screen →
+The printer's page in a browser: **http://spinprinter.local** (or the QR code: printer screen →
 Connect). Upload prints from a phone there and watch how the print goes.
 
 ## Wiring

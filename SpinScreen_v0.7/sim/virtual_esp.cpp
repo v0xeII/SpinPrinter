@@ -293,7 +293,7 @@ static void drawChrome(Canvas& c, int sx, int sy, int sw, int sh, Btn* b, int nb
   char b2[96];
   snprintf(b2, sizeof b2, "%.2f", (double)rpm);
   c.text(F_LG, px + 140, 146, b2, rpm > 0.01f ? PINK : DIM);
-  c.text(F_SM, px + 140, 168, TR("об/мин флакона", "vial rpm"), DIM);
+  c.text(F_SM, px + 140, 168, TR("об/мин колбы", "vial rpm"), DIM);
   snprintf(b2, sizeof b2, TR("угол %.1f°", "angle %.1f°"), fmod(ang, 360.0) < 0 ? fmod(ang, 360.0) + 360 : fmod(ang, 360.0));
   c.text(F_SM, px + 140, 190, b2, DIM);
   int y = 236;

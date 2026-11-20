@@ -130,7 +130,7 @@ fi
 PUB="$(cat "$KEY.pub")"
 cat >"$WORK/boot/user-data" <<EOF
 #cloud-config
-hostname: spinslicer
+hostname: spinprinter
 timezone: Europe/Moscow
 keyboard:
   model: pc105
@@ -235,8 +235,8 @@ echo "  2. ESP32 с экраном подключи к Raspberry USB-кабел�
 echo "  3. Включи питание Raspberry (свой блок: Pi 3 и Zero 2 W — 5 В 2,5 А, Pi 4 — 3 А, Pi 5 — 5 А)."
 echo "     Первый запуск: 10–20 минут"
 echo "     (Raspberry сама скачает и поставит программы). Не выключай её всё это время."
-echo "  4. Когда на экране ESP появится «Raspberry на связи», открой  http://spinslicer.local"
+echo "  4. Когда на экране ESP появится «Raspberry на связи», открой  http://spinprinter.local"
 echo
-echo "  Зайти на Raspberry (без пароля):  ssh pi@spinslicer.local"
-echo "  Как идёт установка:        ssh pi@spinslicer.local tail -f /var/log/spinprinter-firstboot.log"
+echo "  Зайти на Raspberry (без пароля):  ssh pi@spinprinter.local"
+echo "  Как идёт установка:        ssh pi@spinprinter.local tail -f /var/log/spinprinter-firstboot.log"
 echo "  Не работает? Вынь карту, вставь в компьютер: в разделе bootfs файл spinprinter-log.txt."

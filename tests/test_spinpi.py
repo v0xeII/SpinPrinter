@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 import zipfile
 from http.server import ThreadingHTTPServer
 
@@ -400,9 +401,10 @@ class Direction(Tmp):
         make_spin(os.path.join(usb, "broken.spin"), meta=spin_meta(video=b"x"))
         pr.send_list()
         fl = [x for x in pr.esp.sent if x.startswith("FL ")]
-        self.assertTrue(fl[0].startswith("FL BEGIN 1 "), fl)
+        self.assertTrue(fl[0].startswith("FL BEGIN 2 "), fl)  # the broken one too, after the good ones
         self.assertEqual(fl[1].split()[:8], ["FL", "0", "1.50", "1", "5.35", "6.0", "40.000", "1"])
         self.assertTrue(fl[1].endswith(" cube.spin"))
+        self.assertTrue(fl[2].startswith("FL 1 0.00 ") and "broken.spin: " in fl[2])  # rpm 0 + why
 
     def test_print_log_and_feedback(self):
         pr, fid, err = self.print_one("ccw_from_top", "ccw_from_top")
@@ -446,6 +448,33 @@ class Api(Tmp):
         out = r.read()
         c.close()
         return r.status, (out if raw else json.loads(out)), r.getheader("Content-Type")
+
+    def raw_req(self, method, path, data, headers):
+        c = http.client.HTTPConnection("127.0.0.1", self.srv.server_port, timeout=10)
+        c.request(method, path, body=data, headers=headers)
+        r = c.getresponse()
+        out = r.read()
+        c.close()
+        return r.status, json.loads(out)
+
+    def test_other_sites_and_bad_input_are_answered(self):
+        body = json.dumps({"pattern": "white"}).encode()
+        code, r = self.raw_req("POST", "/api/projector", body, {"Content-Type": "text/plain"})
+        self.assertEqual(code, 415)
+        code, r = self.raw_req("POST", "/api/projector", body,
+                               {"Content-Type": "application/json", "Origin": "http://evil.example"})
+        self.assertEqual(code, 403)
+        self.assertEqual(self.pr.pattern, "black")  # the light stayed off
+        code, r, _ = self.req("POST", "/api/print", [1, 2])
+        self.assertEqual(code, 400)
+        code, r, _ = self.req("POST", "/api/print", {"id": "x", "revs": "many"})
+        self.assertEqual((code, r["error"]), (400, "revs: нужно число"))
+        code, r, _ = self.req("POST", "/api/settings", {"delay_s": "soon"})
+        self.assertEqual(code, 400)
+        code, r, _ = self.req("POST", "/api/print", b"{not json")
+        self.assertEqual(code, 400)
+        code, r, _ = self.req("POST", "/api/projector", {"pattern": "black"})  # the page itself still works
+        self.assertEqual(code, 200)
 
     def test_upload_spin(self):
         code, r, _ = self.req("PUT", "/api/files/lattice%20cube.spin", spin_bytes())
@@ -539,7 +568,8 @@ class Api(Tmp):
         self.assertEqual(r["request"]["state"], "waiting_confirm")
         self.assertEqual(self.pr.state, "idle")  # nothing turns or shines yet
         ask = [x for x in self.pr.esp.sent if x.startswith("ASK ")]
-        self.assertEqual(ask, ["ASK 5 200 c.spin"])  # 5 turns of 40 s, the name
+        # 5 whole turns, a little slower than the video's 40 s each: the plan's 5.35 turns of dose, 214 s
+        self.assertEqual(ask, ["ASK 5 214 c.spin"])
         code, st, _ = self.req("GET", "/api/state")
         self.assertEqual(st["request"]["state"], "waiting_confirm")
         self.assertEqual(st["request"]["name"], "c.spin")
@@ -653,6 +683,279 @@ class EspLink(unittest.TestCase):
             spinpi.glob.glob, spinpi.os.path.exists = real_glob, real_exists
 
 
+def job_over(pr, timeout=10.0):
+    """The print is done and its thread gone (it writes the settings after the state says done)."""
+    wait_state(pr, ("done", "error"))
+    end = time.monotonic() + timeout
+    while any(t.name == "spinpi-job" and t.is_alive() for t in threading.enumerate()) and time.monotonic() < end:
+        time.sleep(0.02)
+
+
+class SlicerSeams(Tmp):
+    """Where SpinSlicer and SpinPi meet: the centering shift, the frame size, the question on the screen."""
+
+    def test_the_shift_in_the_frames_is_not_applied_again(self):
+        # SpinSlicer 0.8 put the printer's calibration into the frames and wrote it to printer.projector;
+        # SpinPi then shifted the picture by the calibration once more (12 px became 24)
+        pr, usb = make_printer(self.tmp, offset_px=12, calibrated=True)
+        make_spin(os.path.join(usb, "old.spin"),
+                  meta=spin_meta(printer={"profile_id": "x", "projector": {"offset_px": [12, 0]}}))
+        make_spin(os.path.join(usb, "new.spin"), meta=spin_meta(video_offset_px=[5, -3]))
+        make_spin(os.path.join(usb, "plain.spin"))
+        files = {f["name"]: f for f in pr.lib.list()}
+        self.assertEqual(pr.offset_for(files["old.spin"]), 0)  # all of it is in the frames already
+        self.assertEqual(pr.offset_for(files["new.spin"]), 7)  # only the rest
+        self.assertEqual(pr.offset_for(files["plain.spin"]), 12)  # nothing baked: the whole calibration
+        self.assertIsNone(pr.start(files["old.spin"]["id"], revs=1))
+        self.assertEqual(pr.job["offset_px"], 0)
+        job_over(pr)
+        self.assertIn("OFFSET 0", pr.proj.sent)
+
+    def test_mp4_tag_offset(self):
+        self.assertEqual(spinpi.baked_offset_x({"offset_px": [9, 0]}), 9)
+        self.assertEqual(spinpi.baked_offset_x({"offset_px": 4}), 4)
+        self.assertEqual(spinpi.baked_offset_x({"offset_px": "a"}), 0)
+        self.assertEqual(spinpi.baked_offset_x({}), 0)
+
+    def test_frames_of_another_size_are_named(self):
+        pr, usb = make_printer(self.tmp)
+        make_spin(os.path.join(usb, "fhd.spin"), meta=spin_meta(video_width=1920, video_height=1080))
+        make_spin(os.path.join(usb, "ok.spin"))
+        files = {f["name"]: f for f in pr.annotate(pr.lib.list())}
+        self.assertTrue(files["fhd.spin"]["size_mismatch"])
+        self.assertFalse(files["ok.spin"]["size_mismatch"])
+        plan = pr.plan_for(files["fhd.spin"], 1, 1.0)
+        self.assertTrue(any("1920×1080" in w and "1280×800" in w for w in plan["warnings"]), plan["warnings"])
+        self.assertIsNone(pr.start(files["fhd.spin"]["id"], revs=1))  # it still prints, but says so
+        self.assertTrue(any(x.startswith("MSG Кадры 1920×1080") for x in pr.esp.sent))
+        job_over(pr)
+
+    def test_the_question_comes_back_after_the_board_restarts(self):
+        pr, usb = make_printer(self.tmp)
+        make_spin(os.path.join(usb, "cube.spin"))
+        pr.esp.version = "0.8.8"
+        fid = pr.lib.list()[0]["id"]
+        self.assertIsNone(pr.ask(fid, revs=2))
+        ask = [x for x in pr.esp.sent if x.startswith("ASK")]
+        self.assertEqual(len([x for x in ask if x.startswith("ASK ")]), 1)
+        pr.esp.sent.clear()
+        pr.esp.on_hello()  # the board says READY again
+        self.assertEqual([x for x in pr.esp.sent if x.startswith("ASK")], ask)
+        self.assertNotIn("line", pr.request_view())
+        pr.answer(False)
+        pr.esp.sent.clear()
+        pr.esp.on_hello()  # answered: nothing to ask any more
+        self.assertEqual([x for x in pr.esp.sent if x.startswith("ASK")], [])
+
+
+class WholeTurns(Tmp):
+    """The light goes off on a whole turn; with frames by angle the speed makes up the fraction."""
+
+    def plan(self, pr, plan_revs, rpm=4.0, **kw):
+        f = {"plan_revs": plan_revs, "rpm": rpm, "rev_s": 60.0 / rpm, "fps": 24, "tolerance_pct": 6.0}
+        return pr.plan_for(f, **kw)
+
+    def test_the_fraction_goes_into_the_speed(self):
+        pr, _ = make_printer(self.tmp)
+        p = self.plan(pr, 5.35, factor=1.0)
+        self.assertEqual(p["revs"], 5)
+        self.assertAlmostEqual(p["rpm"], 4.0 * 5 / 5.35)  # 3.74 rpm
+        self.assertAlmostEqual(p["dose_dev_pct"], 0.0)
+        self.assertTrue(p["dose_exact"])
+        self.assertAlmostEqual(p["time_s"], 5.35 * 15.0)  # the plan's light time
+        p = self.plan(pr, 5.35, factor=1.1)  # a correction is made up the same way
+        self.assertAlmostEqual(p["dose_dev_pct"], 0.0)
+
+    def test_neighbour_when_the_nearest_is_out_of_range(self):
+        pr, _ = make_printer(self.tmp)
+        # 1.4 turns: 1 turn would need 4 * 1 / 1.4 = 2.86 rpm (-29 %), 2 turns 5.71 rpm (+43 %): neither
+        p = self.plan(pr, 1.4)
+        self.assertEqual(p["revs"], 1)
+        self.assertFalse(p["dose_exact"])
+        self.assertLess(p["dose_dev_pct"], -25)
+        # 29.5 rpm video: faster than 30 is not possible, so 2 turns of 2.4 (not 3 at 36.9 rpm)
+        p = self.plan(pr, 2.4, rpm=29.5)
+        self.assertEqual(p["revs"], 2)
+        self.assertTrue(p["dose_exact"])
+
+    def test_turns_chosen_by_hand(self):
+        pr, _ = make_printer(self.tmp)
+        p = self.plan(pr, 5.35, revs=6)  # 6 turns: faster, still the plan's dose
+        self.assertAlmostEqual(p["rpm"], 4.0 * 6 / 5.35)
+        self.assertAlmostEqual(p["dose_dev_pct"], 0.0)
+        p = self.plan(pr, 5.35, revs=12)  # far off: the speed cannot, the deviation is shown
+        self.assertEqual(p["rpm"], 4.0)
+        self.assertGreater(p["dose_dev_pct"], 100)
+
+    def test_the_video_player_keeps_its_speed(self):
+        pr, _ = make_printer(self.tmp, proj=FakeMpv())  # mpv: the video's clock drives the light
+        p = self.plan(pr, 5.35)
+        self.assertEqual((p["revs"], p["rpm"]), (5, 4.0))
+        self.assertLess(p["dose_dev_pct"], -6)
+
+    def test_the_job_runs_at_that_speed(self):
+        pr, usb = make_printer(self.tmp)
+        make_spin(os.path.join(usb, "cube.spin"))  # 5.35 turns of 40 s (1.5 rpm), 1200 frames a turn
+        fid = pr.lib.list()[0]["id"]
+        self.assertIsNone(pr.start(fid))
+        self.assertAlmostEqual(pr.job["rpm"], 1.5 * 5 / 5.35)
+        self.assertEqual(pr.job["video_rev_s"], 40.0)  # the frames of a turn come from the video
+        job_over(pr)
+        self.assertIn(f"RPM {1.5 * 5 / 5.35:.4f}", pr.esp.sent)
+        self.assertTrue(any(x.startswith("LOAD 1200 ") for x in pr.proj.sent), pr.proj.sent)
+
+
+class ScreenTalk(Tmp):
+    """What SpinPi tells the printer's screen, and what it hears back."""
+
+    def test_print_question_says_what_is_off(self):
+        pr, usb = make_printer(self.tmp)
+        pr.esp.version = "0.8.8"
+        make_spin(os.path.join(usb, "fhd.spin"), meta=spin_meta(video_width=1920, video_height=1080))
+        fid = pr.lib.list()[0]["id"]
+        self.assertIsNone(pr.ask(fid, revs=5))
+        warn = [x for x in pr.esp.sent if x.startswith("ASKW ")]
+        self.assertIn("ASKW кадры 1920×1080, проектор 1280×800", warn)
+        self.assertIn("ASKW файл нарезан для другого принтера", warn)
+        self.assertLess(pr.esp.sent.index(next(x for x in pr.esp.sent if x.startswith("ASK "))),
+                        pr.esp.sent.index(warn[0]))  # the question first, then its warnings
+        pr.esp.sent.clear()
+        pr.esp.on_hello()  # a restarted board hears all of it again
+        self.assertEqual([x for x in pr.esp.sent if x.startswith("ASK")][1:], warn)
+
+    def test_a_flip_on_the_screen_flips_the_direction(self):
+        pr, _ = make_printer(self.tmp)
+        self.assertEqual(pr.motor_dir, "ccw_from_top")
+        pr.on_esp_event("CFG RPM 4.0000 SPIN 0 DIR 0 MICRO 16 STEPS 200 GEAR 1.00 ACCEL 6 LANG ru")  # GET
+        self.assertEqual(pr.motor_dir, "ccw_from_top")  # the first answer only says what goes with it
+        pr.on_esp_event("CFG DIR 1 GEAR 2.5000")  # flipped in Service → Motor
+        self.assertEqual(pr.motor_dir, "cw_from_top")
+        self.assertEqual(pr.settings["profile"]["motor_gear"], 2.5)
+        self.assertEqual(pr.esp.sent[-1], "MDIR cw")
+        pr.on_esp_event("CFG DIR 1 GEAR 2.5000")  # the same again: nothing changes
+        self.assertEqual(pr.motor_dir, "cw_from_top")
+        pr.on_esp_event("CFG DIR 0 GEAR 2.5000")
+        self.assertEqual(pr.motor_dir, "ccw_from_top")
+        # set on the web page: it goes with the board's setting of that moment
+        self.assertIsNone(pr.set_profile({"motor_dir": "cw_from_top"}))
+        pr.on_esp_event("CFG DIR 0 GEAR 2.5000")
+        self.assertEqual(pr.motor_dir, "cw_from_top")
+        self.assertEqual(pr.profile()["motor"]["direction"], "cw_from_top")
+
+    def test_files_that_cannot_print_are_listed_with_why(self):
+        pr, usb = make_printer(self.tmp)
+        make_spin(os.path.join(usb, "good.spin"))
+        make_spin(os.path.join(usb, "bad.spin"), skip=("video.mp4",))
+        pr.send_list()
+        rows = [x for x in pr.esp.sent if x.startswith("FL ")]
+        self.assertTrue(rows[0].startswith("FL BEGIN 2 "))
+        self.assertTrue(rows[0].endswith(" 1 2"))  # frames by angle; 2 files in all
+        bad = next(x for x in rows if "bad.spin" in x)
+        self.assertTrue(bad.startswith("FL 1 0.00 "))  # rpm 0: the screen greys it and says why
+        self.assertIn("bad.spin: ", bad)
+
+
+class PageSafety(Tmp):
+    def test_a_forgotten_test_picture_goes_dark(self):
+        pr, _ = make_printer(self.tmp)
+        self.assertIsNone(pr.show_pattern("white"))
+        pr.pattern_timeout()
+        self.assertEqual(pr.pattern, "white")  # not yet
+        pr.pattern_t -= pr.PATTERN_OFF_S + 1
+        pr.pattern_timeout()
+        self.assertEqual(pr.pattern, "black")
+        self.assertIn("MSG Тестовая картинка погашена", pr.esp.sent)
+
+    def test_the_page_cancels_a_waiting_print(self):
+        pr, usb = make_printer(self.tmp)
+        pr.esp.version = "0.8.8"
+        make_spin(os.path.join(usb, "cube.spin"))
+        self.assertFalse(pr.cancel_request())  # nothing waits
+        self.assertIsNone(pr.ask(pr.lib.list()[0]["id"], revs=5))
+        self.assertTrue(pr.cancel_request())
+        self.assertEqual(pr.request["state"], "cancelled")
+        self.assertEqual(pr.esp.sent[-1], "ASK END")
+        pr.answer(True)  # a late yes on the screen does nothing now
+        self.assertEqual(pr.state, "idle")
+
+    def test_the_page_needs_no_internet(self):
+        html = open(os.path.join(os.path.dirname(spinpi.__file__), "web", "index.html"), encoding="utf-8").read()
+        self.assertNotIn("googleapis", html)
+        self.assertNotIn("https://", html.split("<body", 1)[0])
+
+
+class ResinCorrection(Tmp):
+    """"How did it come out?" moves the correction of the resin that was printed, not every resin's."""
+
+    def two_resins(self):
+        pr, usb = make_printer(self.tmp)
+        clear = {"name": "Clear", "alpha_per_mm": 0.08, "n_resin": 1.5, "gel_dose_mj_cm3": 12.0}
+        grey = {"id": "grey-1", "alpha_per_mm": 0.3, "n_resin": 1.52, "gel_dose_mj_cm3": 20.0}
+        make_spin(os.path.join(usb, "a.spin"), meta=spin_meta(resin=clear))
+        make_spin(os.path.join(usb, "b.spin"), meta=spin_meta(resin=grey))
+        files = {f["name"]: f for f in pr.lib.list()}
+        return pr, files
+
+    def print_and_answer(self, pr, f, verdict):
+        self.assertIsNone(pr.start(f["id"]))
+        job_over(pr)
+        return pr.result(verdict)
+
+    def test_only_that_resins_correction_moves(self):
+        pr, files = self.two_resins()
+        a, b = files["a.spin"], files["b.spin"]
+        self.assertTrue(a["resin_id"].startswith("r-"))  # no id in the file: one from its optics
+        self.assertEqual(b["resin_id"], "grey-1")
+        pct = self.print_and_answer(pr, a, "under")
+        self.assertGreater(pct, 0)
+        self.assertGreater(pr.resin_factor(a), 1.0)
+        self.assertEqual(pr.resin_factor(b), 1.0)  # the other resin is not touched
+        self.assertEqual(pr.settings["factor"], 1.0)  # nor the general correction
+        self.assertAlmostEqual(pr.plan_for(a)["revs"] * 0 + pr.plan_for(a, revs=5)["resin_factor"], pr.resin_factor(a))
+        h = pr.history[-1]
+        self.assertEqual((h["resin_id"], h["result"]), (a["resin_id"], "under"))
+
+    def test_the_screen_gets_the_plan_with_it(self):
+        pr, files = self.two_resins()
+        pr.settings["resin_factors"] = {files["a.spin"]["resin_id"]: 1.1}
+        pr.send_list()
+        row = next(x for x in pr.esp.sent if x.startswith("FL ") and x.endswith(" a.spin"))
+        self.assertEqual(row.split()[4], f"{5.35 * 1.1:.2f}")
+
+    def test_slicer_resets_it(self):
+        pr, files = self.two_resins()
+        pr.settings["resin_factors"] = {"grey-1": 1.2}
+        pr.reset_resin_factor("grey-1")
+        self.assertEqual(pr.resin_factor(files["b.spin"]), 1.0)
+
+    def test_without_resin_the_general_one_moves(self):
+        pr, usb = make_printer(self.tmp)
+        make_spin(os.path.join(usb, "plain.spin"), meta=spin_meta(resin={}))
+        f = pr.lib.list()[0]
+        self.assertIsNone(f["resin_id"])
+        self.print_and_answer(pr, f, "over")
+        self.assertLess(pr.settings["factor"], 1.0)
+
+
+class ForeignRequests(unittest.TestCase):
+    """A page from elsewhere, open in a browser on the same network, must not drive the printer."""
+
+    def test_rules(self):
+        f = spinpi.foreign_request
+        json_ct = {"Content-Type": "application/json"}
+        self.assertIsNone(f("POST", dict(json_ct, Host="192.168.1.13")))  # SpinSlicer: no Origin
+        self.assertIsNone(f("POST", dict(json_ct, Host="spinslicer.local", Origin="http://spinslicer.local")))
+        self.assertIsNone(f("POST", dict(json_ct, Host="192.168.1.13", **{"Sec-Fetch-Site": "same-origin"})))
+        self.assertIsNone(f("PUT", {"Host": "[fe80::1]:8080", "Content-Type": "application/zip"}))
+        self.assertTrue(f("POST", dict(json_ct, Host="192.168.1.13", Origin="https://evil.example")))
+        self.assertTrue(f("POST", dict(json_ct, Host="192.168.1.13", **{"Sec-Fetch-Site": "cross-site"})))
+        self.assertTrue(f("POST", dict(json_ct, Host="192.168.1.13", Origin="null")))
+        self.assertTrue(f("POST", {"Host": "192.168.1.13", "Content-Type": "text/plain"}))  # a "simple" request
+        self.assertTrue(f("POST", dict(json_ct, Host="evil.example")))  # DNS rebinding
+        self.assertTrue(f("DELETE", {"Host": "192.168.1.13", "Origin": "http://evil.example"}))
+        self.assertIsNone(f("POST", dict(json_ct, Host="printer:80"), own_names=("printer",)))
+
+
 class OneStartAtATime(Tmp):
     def test_busy_as_soon_as_start_returns(self):
         pr, usb = make_printer(self.tmp)
@@ -730,6 +1033,19 @@ class StopReason(Tmp):
 
 # ------------------------------------------------------------------------------------------ mDNS
 class MdnsTest(Tmp):
+    def test_spinprinter_local_on_an_older_host_name(self):
+        d = self.path("avahi", "services")
+        os.makedirs(d)
+        hosts = self.path("avahi", "hosts")
+        wb(hosts, b"192.168.1.5 nas.local\n")
+        m = spinpi.Mdns(80, d)
+        with mock.patch.object(spinpi.subprocess, "run"):
+            self.assertTrue(m.alias("192.168.1.13", "spinslicer"))  # set up before the name was SpinPrinter
+            self.assertFalse(m.alias("192.168.1.13", "spinslicer"))  # once
+            self.assertTrue(m.alias("192.168.1.20", "spinslicer"))  # a new address replaces the old line
+            self.assertFalse(m.alias("192.168.1.20", "spinprinter"))  # already its own name
+        self.assertEqual(rt(hosts).splitlines(), ["192.168.1.5 nas.local", "192.168.1.20 spinprinter.local"])
+
     def test_service_file(self):
         d = self.path("avahi", "services")
         os.makedirs(os.path.dirname(d))

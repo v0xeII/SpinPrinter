@@ -19,10 +19,10 @@ inline uint16_t ACT = hex(0xFF8DB5);     // the selection pill, the Print card a
 inline uint16_t HOT = hex(0xFF4F9A);
 inline uint16_t LIGHT = hex(0xF7E3EC);   // main text
 inline uint16_t DIM = hex(0x8C7380);     // second text
-inline uint16_t FAINT = hex(0x4A3B44);   // hints, off
+inline uint16_t FAINT = hex(0x65555F);   // hints, off (a step up: the darkest grey did not read on a real ST7789)
 inline uint16_t DARK = hex(0x170910);    // text on ACT
 inline uint16_t ROWTXT = hex(0xD2B6C3);  // a row's name
-inline uint16_t WARN = hex(0xFF9DB8);    // reboot / power off rows
+inline uint16_t WARN = hex(0xFFB86B);    // attention: a dose off the plan, reboot / power off (SpinSlicer warn)
 inline uint16_t EDGE = hex(0x5A3346);    // a card's outline
 inline uint16_t SUBSEL = hex(0x5A2A3E);  // second text on a selected card
 inline uint16_t BTN = hex(0x8A4560);     // the Print button before it is chosen
@@ -30,20 +30,36 @@ inline bool lightTheme = false;
 static const uint16_t WHITE = hex(0xFFFFFF);
 static const uint16_t INK = hex(0x170910);  // always dark: QR code modules on their white plate
 
+inline bool lampTheme = false;
+
+// The print screen while "dark while printing" is on: amber on black, a darkroom lamp. The pinks have
+// a fair share of blue, and the screen stands next to the resin.
+static inline void lamp() {
+  if (lampTheme) return;
+  lampTheme = true;
+  lightTheme = false;
+  BG = hex(0x080604); PANEL = hex(0x1A1208); LINE = hex(0x2A1D0C);
+  PINK = hex(0xE08A1E); HOT = hex(0xC86A10); ACT = hex(0xE08A1E);
+  LIGHT = hex(0xF2C27A); DIM = hex(0x9C7440); FAINT = hex(0x5E4628); DARK = hex(0x120A02);
+  ROWTXT = hex(0xD9A860); WARN = hex(0xFFB86B); EDGE = hex(0x4A3214); SUBSEL = hex(0x4A3214);
+  BTN = hex(0x7A5420);
+}
+
 static inline void theme(bool light) {
-  if (light == lightTheme) return;
+  if (light == lightTheme && !lampTheme) return;
+  lampTheme = false;
   lightTheme = light;
-  if (light) {  // SpinSlicer LIGHT: paper, ink, a red-orange accent, black main actions
+  if (light) {  // SpinSlicer LIGHT: paper, ink, the same pink accent as the dark theme, black main actions
     BG = hex(0xF6F4F0); PANEL = hex(0xE7E3DC); LINE = hex(0xDDD8D1);              // bg, surface_alt, border
-    PINK = hex(0xE5452B); HOT = hex(0xC93A22); ACT = hex(0x19171A);               // accent, accent_pressed, action
-    LIGHT = hex(0x19171A); DIM = hex(0x6C686B); FAINT = hex(0xA39E98); DARK = hex(0xF6F4F0);  // text, muted, dim, on_action
+    PINK = hex(0xD63A75); HOT = hex(0xB92E62); ACT = hex(0x19171A);               // accent, accent_pressed, action
+    LIGHT = hex(0x19171A); DIM = hex(0x6C686B); FAINT = hex(0x8E8984); DARK = hex(0xF6F4F0);  // text, muted, dim (a step darker), on_action
     ROWTXT = hex(0x19171A); WARN = hex(0xB86A00); EDGE = hex(0xDDD8D1); SUBSEL = hex(0xA39E98);
     BTN = hex(0x6C686B);
   } else {
     BG = hex(0x0A080B); PANEL = hex(0x19131A); LINE = hex(0x2A2029);
     PINK = hex(0xFF8DB5); HOT = hex(0xFF4F9A); ACT = hex(0xFF8DB5);
-    LIGHT = hex(0xF7E3EC); DIM = hex(0x8C7380); FAINT = hex(0x4A3B44); DARK = hex(0x170910);
-    ROWTXT = hex(0xD2B6C3); WARN = hex(0xFF9DB8); EDGE = hex(0x5A3346); SUBSEL = hex(0x5A2A3E);
+    LIGHT = hex(0xF7E3EC); DIM = hex(0x8C7380); FAINT = hex(0x65555F); DARK = hex(0x170910);
+    ROWTXT = hex(0xD2B6C3); WARN = hex(0xFFB86B); EDGE = hex(0x5A3346); SUBSEL = hex(0x5A2A3E);
     BTN = hex(0x8A4560);
   }
 }

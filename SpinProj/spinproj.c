@@ -37,7 +37,11 @@
 #include "out.h"
 
 #define VERSION "0.1.0"
-#define ANGLE_STALE_NS 300000000LL  // no angle for 0.3 s while the light is on: black at once
+#define ANGLE_STALE_NS 300000000LL  // a gap this long: the next angle is taken as it is (no smoothing)
+// No angle at all for this long while the light is on: black, the print is over. The motor turns at a
+// steady speed and the angle is predicted from it, so one or two answers lost on the USB (0.15 s
+// each) must not end a print; 1 s at the fastest 30 rpm is 180 degrees of prediction, at 4 rpm 24.
+#define ANGLE_LOST_NS 1000000000LL
 #define STAT_EVERY_NS 500000000LL
 
 // ============================================================================ output lines
@@ -306,6 +310,17 @@ static void* loader(void* arg) {
   LoadJob* j = arg;
   char err[200];
   int64_t t0 = now_ns();
+  // The last print's frames go first: LOAD is refused while printing, so nothing needs them, and on a
+  // 1 GB Raspberry the old and the new frames together did not fit (the budget below is measured
+  // after this, so the new ones get all of it).
+  pthread_mutex_lock(&fill_mu);
+  pthread_mutex_lock(&S.mu);
+  Frames* prev = S.fr;
+  S.fr = 0;
+  S.fr_id++;
+  pthread_mutex_unlock(&S.mu);
+  pthread_mutex_unlock(&fill_mu);
+  frames_free(prev);
   size_t budget = mem_budget ? mem_budget : mem_available() * 3 / 4;
   Frames* f = decode(j->path, j->n, proj_w, proj_h, budget, load_progress, err, sizeof err);
   if (!f) {
@@ -367,7 +382,7 @@ static void command(char* line) {
     if (!S.fr) emit("ERR нет кадров (сначала LOAD)");
     else if (S.loading) emit("ERR кадры ещё грузятся");
     else if (t <= 0) emit("ERR ARM: число оборотов");
-    else if (!S.m.have || rx - S.m.rx > ANGLE_STALE_NS) emit("ERR нет угла от ESP (A …)");
+    else if (!S.m.have || rx - S.m.rx > ANGLE_LOST_NS) emit("ERR нет угла от ESP (A …)");
     else {
       S.turns = t;
       S.mode = M_ARMED;
@@ -477,7 +492,7 @@ static int run(Out* o) {
       break;
     }
     int64_t now = now_ns();
-    if ((S.mode == M_ARMED || S.mode == M_LIGHT) && now - S.m.rx > ANGLE_STALE_NS) {
+    if ((S.mode == M_ARMED || S.mode == M_LIGHT) && now - S.m.rx > ANGLE_LOST_NS) {
       S.mode = M_BLACK;
       emit("ERR угол от ESP не приходит %.0f мс: свет выключен", (now - S.m.rx) / 1e6);
     }

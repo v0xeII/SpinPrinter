@@ -17,8 +17,8 @@
 const SpinnyBody& ui_probe_body();
 void ui_probe_area(float* a);
 extern float ui_probe_sa;
-static const char* SCR[] = {"boot", "menu", "setup", "print", "done", "connect", "ask"};
-static long outBy[7][4];  // screen x edge (left, right, top, bottom)
+static const char* SCR[] = {"boot", "menu", "setup", "print", "done", "connect", "ask", "wiz", "err"};
+static long outBy[9][4];  // screen x edge (left, right, top, bottom)
 
 static float cur = 0, tgt = 0;
 static double ang = 0;
@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
   for (size_t i = 3; i < flips.size(); i++)
     if (flips[i] - flips[i - 3] < 8) dither++;
   printf("   turned round in the menu %zu times in 20 min, back-and-forth bursts: %ld\n", flips.size(), dither);
-  for (int k = 0; k < 7; k++)
+  for (int k = 0; k < 9; k++)
     if (outBy[k][0] + outBy[k][1] + outBy[k][2] + outBy[k][3])
       printf("   %-8s left %ld  right %ld  top %ld  bottom %ld\n", SCR[k], outBy[k][0], outBy[k][1], outBy[k][2], outBy[k][3]);
   return 0;

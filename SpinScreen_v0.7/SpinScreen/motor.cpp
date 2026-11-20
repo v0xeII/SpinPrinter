@@ -40,8 +40,18 @@ static inline void enPin(int lvl) {
   if (pinEn >= 0) digitalWrite(pinEn, lvl);
 }
 
+// halfFP is 64 bits on a 32-bit core: written by the ramp task and read in the step interrupt, it
+// could be read half old, half new (a wild step period for one step). Both sides take the lock.
+static void setHalf(uint64_t h) {
+  portENTER_CRITICAL(&mux);
+  halfFP = h;
+  portEXIT_CRITICAL(&mux);
+}
+
 static bool IRAM_ATTR onAlarm(gptimer_handle_t t, const gptimer_alarm_event_data_t* e, void*) {
+  portENTER_CRITICAL_ISR(&mux);
   uint64_t h = halfFP;
+  portEXIT_CRITICAL_ISR(&mux);
   uint64_t next;
   if (h == 0) {
     if (level) { stepPin(false); level = false; }
@@ -53,9 +63,9 @@ static bool IRAM_ATTR onAlarm(gptimer_handle_t t, const gptimer_alarm_event_data
       portENTER_CRITICAL_ISR(&mux);
       steps += dirSign;
       bool hit = moving && steps == moveTarget;
+      if (hit) halfFP = 0;  // integer-only work here: no floating point inside an interrupt
       portEXIT_CRITICAL_ISR(&mux);
-      if (hit) {  // integer-only work here: no floating point inside an interrupt
-        halfFP = 0;
+      if (hit) {
         moving = false;
         hitTarget = true;
       }
@@ -101,14 +111,14 @@ static void ramp(void*) {
   }
   float stepHz = cur / 60.f * microPerVialRev();
   if (stepHz < 1.f) {
-    halfFP = 0;
+    setHalf(0);
     if (!wantOn && cur == 0) enPin(HIGH);  // driver off: cool and silent
     return;
   }
   enPin(LOW);
   double half = (double)TICK_HZ / (2.0 * stepHz);
   if (half < 20) half = 20;  // 250 kHz step limit
-  halfFP = (uint64_t)(half * 65536.0);
+  setHalf((uint64_t)(half * 65536.0));
 }
 
 void motor_init(const MotorConfig& cfg, int step, int dir, int en) {

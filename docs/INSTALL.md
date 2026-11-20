@@ -42,14 +42,14 @@ press and release **RESET**, release BOOT and try again.
 1. Install [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
 2. Device: **your Raspberry Pi model**. OS: **Raspberry Pi OS (other) → Raspberry Pi OS Lite (64-bit)**. Storage: your microSD.
 3. "Edit settings":
-   - hostname: `spinslicer`
+   - hostname: `spinprinter`
    - a user name and password (remember them)
    - Wi-Fi: network name, password, your country
    - "Services": enable SSH (password)
 4. "Write". Put the card in the Raspberry, power it and wait 3 minutes.
 5. On the computer open a terminal (Windows: **PowerShell**) and log in to the Raspberry:
    ```
-   ssh user@spinslicer.local
+   ssh user@spinprinter.local
    ```
    Answer `yes` to the "yes/no" question, then type the password (it does not show, that is normal).
 6. One command on the Raspberry (10–20 minutes, the Raspberry reboots at the end):
@@ -86,7 +86,7 @@ Wire everything with the power off.
 
 1. Switch the Raspberry on. When the printer's screen says **"Raspberry connected"**, it is ready. (The screen speaks English
    and Russian: Settings → Display → Language.)
-2. Open `http://spinslicer.local` (or scan the QR code: printer screen → Connect).
+2. Open `http://spinprinter.local` (or scan the QR code: printer screen → Connect).
 3. **Settings → Projector** on the printer's screen: "Grid" and "Centering" to focus and find the vial axis.
 4. In SpinSlicer: Settings → Printer → **"Connect"**, then on the Print step → **"Print"**. The
    printer's screen asks "Print?": put the vial in and push the joystick right. Or **"To USB stick"**
@@ -100,7 +100,7 @@ Wire everything with the power off.
 | black screen after flashing | check the screen's wires (step 3) and that VCC is on 3V3; long wires: try a shorter cable |
 | no "Raspberry connected" | wait 20 minutes after the first start; check that the USB cable carries data |
 | "Undervoltage" on a monitor | the right supply for your model (table above), a short thick cable without adapters |
-| `spinslicer.local` does not open | are the PC and the Raspberry on the same network? On Windows without Bonjour use the IP from the printer's screen |
+| `spinprinter.local` does not open | are the PC and the Raspberry on the same network? On Windows without Bonjour use the IP from the printer's screen |
 | way B: the Raspberry did not come up | put the card in a computer: the `bootfs` partition holds a boot diary, `spinprinter-log.txt` |
-| service log | `ssh pi@spinslicer.local journalctl -u spinpi -n 50` |
+| service log | `ssh pi@spinprinter.local journalctl -u spinpi -n 50` |
 | can the Raspberry keep up with the frames | `sudo systemctl stop spinpi && sudo /opt/spinpi/spinproj bench --rt --cpu 3` |

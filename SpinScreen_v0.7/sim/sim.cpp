@@ -81,7 +81,7 @@ int main(int argc, char** argv) {
   ui_init(hal, s, 0);
   for (int ms = 1500; ms < 60000; ms += 1000) line(ms, "PING");
   line(1600, "URL http://192.168.1.42");
-  line(1600, "HOST spinslicer.local");
+  line(1600, "HOST spinprinter.local");
   line(1600, "NET SpinSlicer-5G");
   line(1600, "CAL 0 400");
   int T = 3000;

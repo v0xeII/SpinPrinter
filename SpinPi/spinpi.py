@@ -60,7 +60,14 @@ def version_tuple(text):
 
 
 def log(*a):
-    print(time.strftime("%H:%M:%S"), *a, flush=True)
+    """A log line. A character the console cannot show (×, a name in another script) must never stop
+    the code that logs it: it is replaced, not raised."""
+    try:
+        print(time.strftime("%H:%M:%S"), *a, flush=True)
+    except UnicodeEncodeError:
+        line = " ".join([time.strftime("%H:%M:%S")] + [str(x) for x in a])
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(enc, "replace").decode(enc, "replace"), flush=True)
 
 
 def load_json(path, default):
@@ -204,9 +211,9 @@ class Esp:
                     time.sleep(1)
                     continue
             try:
-                if time.time() - last_ping > 1:
+                if time.monotonic() - last_ping > 1:  # not time.time(): NTP moves it after boot
                     self.send("PING")
-                    last_ping = time.time()
+                    last_ping = time.monotonic()
                 for line in lines.feed(self.ser.read(max(1, self.ser.in_waiting))):
                     self.on_line(line)
                 quiet = time.monotonic() - max(self.last_pong, opened)
@@ -231,6 +238,9 @@ class Esp:
     def hello(self):
         for line in list(self.greeting):
             self.send(line)
+        cb = getattr(self, "on_hello", None)  # what else a freshly (re)started board must hear
+        if cb:
+            cb()
 
     def on_line(self, line):
         """One whole line. A line that does not parse is logged and skipped: the link stays up."""
@@ -267,6 +277,8 @@ class Esp:
                 self.nvs = bool(m.group(2))
         elif line.startswith("READY"):  # ESP rebooted
             self.hello()
+        elif line.startswith("CFG "):  # the answer to GET: handled with the events, in order
+            self.events.put(line)
         elif line.startswith("EV "):
             if line == "EV STOP":  # never waits behind a slow event (a list of a big USB stick)
                 threading.Thread(target=self.on_event, args=("STOP",), daemon=True).start()
@@ -714,7 +726,35 @@ def spin_plan(meta):
     pr = meta.get("printer")
     if isinstance(pr, dict) and pr.get("profile_id"):
         plan["printer_profile_id"] = pr["profile_id"]
+    # the centering shift the slicer already put into the frames. video.offset_px since SpinSlicer
+    # 0.9; before, the same number sat in printer.projector.offset_px (and SpinPi shifted it again)
+    baked = v.get("offset_px")
+    if baked is None and isinstance(pr, dict) and isinstance(pr.get("projector"), dict):
+        baked = pr["projector"].get("offset_px")
+    if baked is not None:
+        plan["offset_px"] = baked
     return plan
+
+
+def resin_id(resin):
+    """The resin a print is for: resin.id from SpinSlicer (0.9+), else made from its optics (absorption,
+    refractive index), so older files of the same resin share it. None without resin data."""
+    if not isinstance(resin, dict):
+        return None
+    if isinstance(resin.get("id"), str) and resin["id"].strip():
+        return resin["id"].strip()[:40]
+    a, n = resin.get("alpha_per_mm"), resin.get("n_resin")
+    if not (_num(a) and _num(n)):
+        return None
+    return "r-" + hashlib.sha1(f"{float(a):.4f}/{float(n):.4f}".encode()).hexdigest()[:10]
+
+
+def baked_offset_x(plan):
+    """The horizontal centering shift already in the frames (spin.json / the MP4 tag), 0 if none."""
+    v = plan.get("offset_px") if isinstance(plan, dict) else None
+    if isinstance(v, (list, tuple)) and v:
+        v = v[0]
+    return int(v) if _num(v) and abs(v) <= 4000 else 0
 
 
 # =============================================================================== library
@@ -885,7 +925,9 @@ class Library:
         w = plan.get("warnings")
         d["warnings"] = [str(x) for x in w if x] if isinstance(w, list) else []
         d["resin"] = plan.get("resin") if isinstance(plan.get("resin"), dict) else None
+        d["resin_id"] = resin_id(d["resin"])
         d["printer_profile_id"] = plan.get("printer_profile_id")
+        d["baked_offset_px"] = baked_offset_x(plan)
         if m.get("frames") and m.get("fps"):
             dur = m["frames"] / m["fps"]
             hint = RPM_IN_NAME.search(name)
@@ -1146,6 +1188,8 @@ class Printer:
         self.wait = None  # (seconds, kind) while waiting before the light
         self.job = None
         self.request = None  # the last print sent from SpinSlicer that waits for a yes on the screen
+        self.board_dir_inv = None  # the board's DIR setting, as it last said (CFG)
+        esp.on_hello = self.board_hello
         self.msg = ""
         self.sync_ms = None
         self.drops = 0
@@ -1180,18 +1224,61 @@ class Printer:
         r = self.settings["display_fps"] / fps if fps else 0
         return r > 0 and abs(r - round(r)) < 0.02
 
+    # The light can only go off on a whole turn. With frames by angle (SpinProj) the speed is free, and
+    # the dose of a turn grows with its time: the fraction the slicer asked for (5.35 turns) is made
+    # up by turning a little slower (5 turns at 4.00 * 5 / 5.35 = 3.74 rpm), so the dose is the plan's.
+    SPEED_TRIM = 0.20          # at most this far from the video's own speed
+    RPM_RANGE = (1.0, 30.0)    # what the board's motor does (config.h RPM_MIN / RPM_MAX)
+
+    def speed_for(self, rpm, revs, need):
+        """The speed that gives `need` turns' dose in `revs` turns, or None (out of range)."""
+        if not self.angle_mode or not need or need <= 0 or revs < 1:
+            return None
+        r = rpm * revs / need
+        if abs(r / rpm - 1.0) > self.SPEED_TRIM + 1e-9 or not (self.RPM_RANGE[0] <= r <= self.RPM_RANGE[1]):
+            return None
+        return r
+
+    # "How did it come out?" moves a correction. For a file that names its resin it is that resin's
+    # (another resin's prints are not moved by it); the general one (the screen's "Correction" row,
+    # settings["factor"]) stays the user's. The light is plan x general x resin correction.
+    def resin_factor(self, f):
+        rid = f.get("resin_id") if isinstance(f, dict) else None
+        return float((self.settings.get("resin_factors") or {}).get(rid, 1.0)) if rid else 1.0
+
     def plan_for(self, f, revs=None, factor=None):
-        """revolutions to expose, their time and how far that is from the slicer's plan."""
+        """revolutions to expose, the speed and time, and how far the dose is from the slicer's plan."""
         factor = float(self.settings["factor"] if factor is None else factor)
+        rf = self.resin_factor(f)
         plan = f.get("plan_revs")
-        if revs is None:
-            revs = max(1, round(plan * factor)) if plan else int(self.settings["default_revs"])
+        need = plan * factor * rf if plan else None
+        rpm = None
+        if revs is None and need:
+            near = max(1, round(need))  # the nearest whole number first, then its neighbours
+            for n in sorted({near, max(1, near - 1), near + 1}, key=lambda n: (abs(n - need), n)):
+                rpm = self.speed_for(f["rpm"], n, need)
+                if rpm:
+                    revs = n
+                    break
+            if revs is None:
+                revs = near
+        elif revs is None:
+            revs = int(self.settings["default_revs"])
         revs = max(1, int(revs))
-        d = {"revs": revs, "time_s": revs * f["rev_s"], "factor": factor, "plan_revs": plan,
+        if rpm is None and need:
+            rpm = self.speed_for(f["rpm"], revs, need)
+        exact = rpm is not None
+        rpm = rpm or f["rpm"]
+        rev_s = 60.0 / rpm
+        d = {"revs": revs, "time_s": revs * rev_s, "rpm": rpm, "rev_s": rev_s, "dose_exact": exact,
+             "speed_trim_pct": 100.0 * (rpm / f["rpm"] - 1.0), "factor": factor, "plan_revs": plan,
+             "resin_id": f.get("resin_id"), "resin_factor": rf,
              "tolerance_pct": f.get("tolerance_pct"), "cadence_ok": self.cadence_ok(f.get("fps", 0)),
-             "reversed": self.reversed(f), "other_printer": self.other_printer(f), "warnings": f.get("warnings") or []}
+             "reversed": self.reversed(f), "other_printer": self.other_printer(f),
+             "warnings": (f.get("warnings") or []) + ([self.size_warning(f)] if self.size_mismatch(f) else [])}
         if plan:
-            d["dose_dev_pct"] = 100.0 * (revs / (plan * factor) - 1.0)
+            # dose ~ turns x time of a turn: 0 when the speed made up the fraction
+            d["dose_dev_pct"] = 100.0 * (revs * (f["rpm"] / rpm) / need - 1.0)
         return d
 
     # ---- how the video's frames sit on the vial
@@ -1208,10 +1295,24 @@ class Printer:
         pid = f.get("printer_profile_id")
         return bool(pid) and pid != self.settings["printer_id"]
 
+    def size_mismatch(self, f):
+        """The video is not the projector's size: it would be scaled, and the part with it."""
+        w, h = f.get("width"), f.get("height")
+        return bool(w and h and self.pw and self.ph and (int(w), int(h)) != (int(self.pw), int(self.ph)))
+
+    def size_warning(self, f):
+        return (f"кадры {f['width']}×{f['height']}, проектор {self.pw}×{self.ph}: картинка растянется, "
+                "размер детали и ширина колбы не совпадут. Нарежь под разрешение проектора")
+
+    def offset_for(self, f):
+        """The centering shift to apply: the printer's calibration minus what the frames already have."""
+        return int(self.settings["offset_px"]) - int(f.get("baked_offset_px") or 0)
+
     def annotate(self, files):
         for f in files:
             f["reversed"] = self.reversed(f)
             f["other_printer"] = self.other_printer(f)
+            f["size_mismatch"] = self.size_mismatch(f)
         return files
 
     # ---- the printer profile for SpinSlicer
@@ -1234,6 +1335,7 @@ class Printer:
             "exposure": {"factor": s["factor"]},
             "software": {"spinpi": VERSION, "spinscreen": self.esp.version or None,
                          "engine": "angle" if self.angle_mode else "mpv"},
+            "storage": {"free_gb": free_gb(self.data)},  # SpinSlicer checks there is room before sending
         }
 
     def set_profile(self, b):
@@ -1251,6 +1353,8 @@ class Printer:
                 if v not in ROTATIONS:
                     return f"{k}: {' / '.join(ROTATIONS)}"
                 prof[k] = v
+                if k == "motor_dir" and self.board_dir_inv is not None:
+                    prof["motor_dir_inv"] = self.board_dir_inv
             elif v is None or v == "":
                 prof[k] = PROFILE_DEFAULTS[k]
             else:
@@ -1322,11 +1426,15 @@ class Printer:
             need = ".".join(map(str, ASK_FIRMWARE))
             return f"прошивка платы {self.esp.version} не спрашивает «Печатать?»: прошей плату {need} или новее"
         self.expire_request(replaced=True)
+        name = f["name"].encode("utf-8")[:60].decode("utf-8", "ignore")
+        lines = [f"ASK {int(p['revs'])} {int(round(p['time_s']))} {name}"]
+        lines += [f"ASKW {w}"[:150] for w in self.ask_warnings(f, p)[:2]]
         self.request = {"state": "waiting_confirm", "id": fid, "name": f["name"], "revs": p["revs"],
                         "time_s": p["time_s"], "error": None, "t": time.monotonic(),
-                        "args": (fid, revs, factor, delay_s)}
-        name = f["name"].encode("utf-8")[:60].decode("utf-8", "ignore")
-        self.esp.send(f"ASK {int(p['revs'])} {int(round(p['time_s']))} {name}")
+                        "args": (fid, revs, factor, delay_s), "lines": lines}
+        self.send_shape(fid)
+        for line in lines:
+            self.esp.send(line)
         log("print request:", f["name"], "waits for a yes on the screen")
         return None
 
@@ -1347,6 +1455,17 @@ class Printer:
         if err:
             self.esp.send(f"STATE ERROR {err}")
 
+    def cancel_request(self):
+        """The web page's "Cancel" on a print that waits for its yes on the printer's screen."""
+        with self.lock:
+            r = self.request
+            if not r or r["state"] != "waiting_confirm":
+                return False
+            r["state"] = "cancelled"
+            self.esp.send("ASK END")
+            log("print request: cancelled on the web page")
+            return True
+
     def expire_request(self, replaced=False):
         """Drop a request nobody answered (or one a newer print replaces): the screen leaves it."""
         r = self.request
@@ -1356,7 +1475,64 @@ class Printer:
 
     def request_view(self):
         r = self.request
-        return {k: v for k, v in r.items() if k not in ("t", "args")} if r else None
+        return {k: v for k, v in r.items() if k not in ("t", "args", "lines")} if r else None
+
+    def ask_warnings(self, f, p):
+        """What the screen should say next to "Print?": only SpinPi knows these."""
+        out = []
+        if f.get("size_mismatch") or self.size_mismatch(f):
+            out.append(f"кадры {f['width']}×{f['height']}, проектор {self.pw}×{self.ph}")
+        if p.get("reversed"):
+            out.append("кадры пойдут в обратном порядке")
+        if p.get("other_printer"):
+            out.append("файл нарезан для другого принтера")
+        tol = p.get("tolerance_pct") or 5.0
+        if p.get("dose_dev_pct") is not None and not p.get("dose_exact") and abs(p["dose_dev_pct"]) > tol / 2:
+            out.append(f"доза {p['dose_dev_pct']:+.0f}% от расчёта")
+        return out
+
+    def ask_again(self):
+        """The board (re)started while a print waits for its yes: ask on the screen again. Without this
+        the question was gone and the request waited 10 minutes for an answer nobody could give."""
+        r = self.request
+        if r and r["state"] == "waiting_confirm" and r.get("lines"):
+            self.send_shape(r["id"])
+            for line in r["lines"]:
+                self.esp.send(line)
+
+    # ---- which way the vial turns, and the gear: one place
+    # The board's screen sets them (Service → Motor, the wizard). Which way "DIR 0" turns the vial
+    # depends on how the motor is wired, so SpinPi keeps the real direction (motor_dir, also set on the
+    # web page) and follows every flip made on the screen: EV CFG DIR <0|1> GEAR <g>, and the GET answer.
+    def board_hello(self):
+        """What a freshly (re)started board has to hear besides the greeting."""
+        self.esp.send("GET")  # its direction and gear come back as a CFG line
+        self.esp.send(f"MDIR {'ccw' if self.motor_dir == 'ccw_from_top' else 'cw'}")
+        self.ask_again()
+
+    def board_cfg(self, dir_inv=None, gear=None):
+        prof = dict(self.settings["profile"])
+        changed = False
+        if dir_inv is not None:
+            self.board_dir_inv = dir_inv
+            base = prof.get("motor_dir_inv")
+            if base is None:  # first time: this is what the direction on record goes with
+                prof["motor_dir_inv"] = dir_inv
+                changed = True
+            elif dir_inv != base:  # flipped on the screen: the vial turns the other way now
+                prof["motor_dir"] = "cw_from_top" if self.motor_dir == "ccw_from_top" else "ccw_from_top"
+                prof["motor_dir_inv"] = dir_inv
+                log("motor direction changed on the printer's screen:", prof["motor_dir"])
+                changed = True
+        if gear and gear > 0 and abs(float(prof.get("motor_gear") or 0) - gear) > 1e-6:
+            prof["motor_gear"] = gear
+            changed = True
+        if changed:
+            self.settings["profile"] = prof
+            self.save_settings()
+            if self.on_profile:
+                self.on_profile()
+        self.esp.send(f"MDIR {'ccw' if self.motor_dir == 'ccw_from_top' else 'cw'}")
 
     def start(self, fid, revs=None, factor=None, delay_s=None):
         # Two starts at once (a yes on the screen and Print on the page) both found the printer idle,
@@ -1375,16 +1551,21 @@ class Printer:
         if not f.get("plan_revs"):
             self.settings["default_revs"] = p["revs"]
         self.save_settings()
-        self.job = dict(p, id=fid, file=f["name"], path=path, rpm=f["rpm"], rev_s=f["rev_s"], fps=f.get("fps"),
+        self.job = dict(p, id=fid, file=f["name"], path=path, video_rev_s=f["rev_s"], fps=f.get("fps"),
                         delay_s=delay_s, frames_per_rev=f.get("frames_per_rev"), phase=f.get("frame0_angle_deg") or 0.0,
                         format=f.get("format", "video"), plan=f.get("plan") if isinstance(f.get("plan"), dict) else None,
-                        resin=f.get("resin"), printer_profile_id=f.get("printer_profile_id"))
+                        resin=f.get("resin"), printer_profile_id=f.get("printer_profile_id"),
+                        offset_px=self.offset_for(f), size_mismatch=self.size_mismatch(f))
         self.job_seq += 1
         self.job["seq"] = self.job_seq
+        if self.job["size_mismatch"]:  # it still prints, but the screen says why the part may come out wrong
+            log("print:", self.size_warning(f))
+            self.esp.send(f"MSG Кадры {f['width']}×{f['height']}, проектор {self.pw}×{self.ph}: размер не тот")
         self.state, self.msg = "wait", ""  # busy from this moment, not from when the thread runs
         self.stop_flag.clear()
         self.stop_reason = ""
-        threading.Thread(target=self._run_angle if self.angle_mode else self._run, daemon=True).start()
+        threading.Thread(target=self._run_angle if self.angle_mode else self._run, name="spinpi-job",
+                         daemon=True).start()
         return None
 
     def stop(self, reason="со страницы принтера"):
@@ -1412,6 +1593,7 @@ class Printer:
                 "id": j["id"], "file": j["file"], "format": j.get("format", "video"),
                 "revs": j["revs"], "time_s": j["time_s"], "rpm": j["rpm"],
                 "factor": j["factor"], "exposure_pct": round(100 * (j["factor"] - 1), 2),
+                "resin_id": j.get("resin_id"), "resin_factor": j.get("resin_factor", 1.0),
                 "plan_revs": j["plan_revs"], "tolerance_pct": j["tolerance_pct"],
                 "plan": {k: plan[k] for k in keep if plan.get(k) is not None} or None,
                 "resin": j.get("resin"), "printer_profile_id": j.get("printer_profile_id"),
@@ -1419,7 +1601,8 @@ class Printer:
                 "frame0_angle_deg": j.get("phase", 0.0), "engine": engine, "result": None}
 
     def result(self, verdict):
-        """Feedback after a print: under / ok / over. Moves the exposure factor for next time."""
+        """Feedback after a print: under / ok / over. Moves the correction for next time: the resin's
+        when the print named one, else the general one. Returns the correction now, in %."""
         if not self.history or verdict not in ("under", "ok", "over"):
             return None
         h = self.history[-1]
@@ -1427,21 +1610,36 @@ class Printer:
         h["factor_after"] = None  # filled below: the correction the next print will start from
         tol = h.get("tolerance_pct") or 5.0
         step = min(0.15, max(0.02, tol / 100.0))
-        if verdict == "under":
-            self.settings["factor"] *= 1 + step
-        elif verdict == "over":
-            self.settings["factor"] *= 1 - step
-        self.settings["factor"] = round(max(0.3, min(3.0, self.settings["factor"])), 4)
-        h["factor_after"] = self.settings["factor"]
+        k = 1 + step if verdict == "under" else (1 - step if verdict == "over" else 1.0)
+        rid = h.get("resin_id")
+        if rid:
+            rf = self.settings.setdefault("resin_factors", {})
+            rf[rid] = round(max(0.3, min(3.0, float(rf.get(rid, 1.0)) * k)), 4)
+            h["factor_after"] = rf[rid]
+            pct = 100 * (rf[rid] - 1)
+        else:
+            self.settings["factor"] = round(max(0.3, min(3.0, self.settings["factor"] * k)), 4)
+            h["factor_after"] = self.settings["factor"]
+            pct = 100 * (self.settings["factor"] - 1)
         self.save_settings()
         self.save_history()
-        pct = 100 * (self.settings["factor"] - 1)
         return pct
+
+    def reset_resin_factor(self, rid, value=1.0):
+        """SpinSlicer took the correction into the resin's dose ("Apply"): it starts again from 1."""
+        rf = self.settings.setdefault("resin_factors", {})
+        rf[str(rid)[:40]] = round(max(0.3, min(3.0, float(value))), 4)
+        self.save_settings()
+
+    # A test picture (white, grid…) left on would cure the resin of the next print, or a vial left in:
+    # it goes dark by itself after this long without being touched.
+    PATTERN_OFF_S = 300.0
 
     def show_pattern(self, name):
         if self.busy():
             return "busy"
         self.pattern = name
+        self.pattern_t = time.monotonic()
         if name == "black":
             self.proj.black()
             return None
@@ -1464,13 +1662,21 @@ class Printer:
             self.show_pattern(self.pattern)
 
     def send_list(self):
-        files = [f for f in self.lib.list() if f.get("rpm") and not f.get("error")][:32]  # SpinScreen keeps 32
+        every = self.lib.list()
+        good = [f for f in every if f.get("rpm") and not f.get("error")]
+        bad = [f for f in every if f.get("error")]  # shown greyed with why, not silently left out
+        files = (good + bad)[:32]  # SpinScreen keeps 32
         self.esp_list = [f["id"] for f in files]
         s, e = self.settings, self.esp
-        e.send(f"FL BEGIN {len(files)} {100 * (s['factor'] - 1):.0f} {s['delay_s']:.0f} {int(s['default_revs'])}")
+        e.send(f"FL BEGIN {len(files)} {100 * (s['factor'] - 1):.0f} {s['delay_s']:.0f} {int(s['default_revs'])} "
+               f"{1 if self.angle_mode else 0} {len(good) + len(bad)}")  # speed makes up a fraction; all files
         for i, f in enumerate(files):
+            if f.get("error"):  # rpm 0 = cannot be printed; the name carries the reason
+                why = f"{f['name']}: {f['error']}".encode("utf-8")[:150].decode("utf-8", "ignore")
+                e.send(f"FL {i} 0.00 {1 if f['source'] == 'usb' else 0} -1.00 -1.0 0.000 0 {why}")
+                continue
             name = f["name"].encode("utf-8")[:60].decode("utf-8", "ignore")
-            plan = f.get("plan_revs") or -1
+            plan = (f["plan_revs"] * self.resin_factor(f)) if f.get("plan_revs") else -1
             tol = f.get("tolerance_pct") or -1
             e.send(f"FL {i} {f['rpm']:.2f} {1 if f['source'] == 'usb' else 0} {plan:.2f} {tol:.1f} "
                    f"{f['rev_s']:.3f} {1 if self.cadence_ok(f.get('fps', 0)) else 0} {name}")
@@ -1491,6 +1697,14 @@ class Printer:
                 self.esp.send(f"STATE ERROR {err}")
         elif p[0] in ("GO", "NO"):
             self.answer(p[0] == "GO")
+        elif p[0] == "CFG":  # EV CFG DIR 0 GEAR 1.0000 (a change on the screen) / CFG RPM … DIR … GEAR … (GET)
+            kv = dict(zip(p[1::2], p[2::2]))
+            try:
+                d = int(kv["DIR"]) if "DIR" in kv else None
+                g = float(kv["GEAR"]) if "GEAR" in kv else None
+            except ValueError:
+                d = g = None
+            self.board_cfg(d if d in (0, 1) else None, g)
         elif p[0] == "STOP":
             self.stop("с экрана принтера")
         elif p[0] == "RESULT" and len(p) > 1:
@@ -1757,7 +1971,7 @@ class Printer:
             t_dark = time.monotonic() + j["delay_s"]
             self._wait(lambda: t_dark - time.monotonic(), "dark")
             # 4) light: video at its own clock, the motor follows
-            self.proj.play_loop(j["path"], 1.0, int(self.settings["offset_px"]))
+            self.proj.play_loop(j["path"], 1.0, j["offset_px"])
             for _ in range(100):
                 tpos = self.proj.get("time-pos")
                 if tpos is not None:
@@ -1801,7 +2015,9 @@ class Printer:
 
     # ---- the job thread, projector by angle (SpinProj)
     def _feed_angles(self, done):
-        """Ask the ESP for the angle 20 times a second and hand it to SpinProj, for the whole job."""
+        """Ask the ESP for the angle 20 times a second and hand it to SpinProj, for the whole job.
+        A lost answer is asked again at once (SpinProj keeps the light on from its own prediction
+        for up to SpinProj's ANGLE_LOST_NS, but no longer)."""
         while not done.is_set():
             p = self.esp.query_pos()
             if p:
@@ -1809,7 +2025,9 @@ class Printer:
                 self.last_pos = (a, rpm, at_speed, t_mid, time.monotonic())
                 self.motor_angle, self.motor_rpm = a, rpm
                 self.proj.angle(a, rpm, int(t_mid * 1e9), int(rtt * 1e9))
-            time.sleep(0.05)
+                time.sleep(0.05)
+            else:
+                time.sleep(0.005)  # no answer within 0.15 s: again now, not 50 ms later
 
     def _proj_event(self, timeout):
         try:
@@ -1826,11 +2044,11 @@ class Printer:
             self.state, self.msg, self.sync_ms, self.drops, self.pattern = "wait", "", None, 0, "black"
             self.last_pos = None
             pr.black()
-            frames = j.get("frames_per_rev") or max(1, round(j["rev_s"] * (j.get("fps") or 0)))
+            frames = j.get("frames_per_rev") or max(1, round(j["video_rev_s"] * (j.get("fps") or 0)))
             if j.get("reversed"):
                 log("the video turns the other way than the motor: frames go backwards")
             # unpacks while the motor spins up
-            pr.load(j["path"], frames, self.settings["offset_px"], reverse=j.get("reversed"), phase_deg=j.get("phase", 0.0))
+            pr.load(j["path"], frames, j["offset_px"], reverse=j.get("reversed"), phase_deg=j.get("phase", 0.0))
             threading.Thread(target=self._feed_angles, args=(done,), daemon=True).start()
             self.send_shape(j["id"])
             e.send("FILE " + j["file"].encode("utf-8")[:60].decode("utf-8", "ignore"))
@@ -2024,10 +2242,18 @@ class Printer:
                     e.send(f"DROPS {self.drops}")
             time.sleep(0.1 if remaining > rpm * 6.0 * 1.0 else 0.02)
 
+    def pattern_timeout(self):
+        if self.pattern != "black" and not self.busy() and \
+                time.monotonic() - getattr(self, "pattern_t", time.monotonic()) > self.PATTERN_OFF_S:
+            log("test picture left on: dark again")
+            self.show_pattern("black")
+            self.esp.send("MSG Тестовая картинка погашена")
+
     def poll_idle(self):
         """Keep motor rpm/angle fresh for the web page when no print is running."""
         while True:
             self.expire_request()
+            self.pattern_timeout()
             if not self.busy():
                 p = self.esp.query_pos()
                 if p:
@@ -2394,8 +2620,134 @@ class Mdns:
         self.text = text
         return True
 
+    PRINTER_HOST = "spinprinter.local"
+
+    def alias(self, ip, hostname):
+        """The printer's own name, spinprinter.local, also on a Raspberry set up under another host name
+        (before 0.8.9 the SD card named it spinslicer): a line in avahi's hosts file, kept on its address."""
+        if not self.folder or not ip or ip.startswith("127.") or hostname.lower() in ("spinprinter", ""):
+            return False
+        path = os.path.join(os.path.dirname(self.folder.rstrip("/")), "hosts")  # /etc/avahi/hosts
+        if not os.path.isdir(os.path.dirname(path)):
+            return False
+        want = f"{ip} {self.PRINTER_HOST}"
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            lines = []
+        keep = [ln for ln in lines if not (ln.split() and ln.split()[-1] == self.PRINTER_HOST)]
+        if want in lines and len(keep) == len(lines) - 1:
+            return False  # already there, once
+        try:
+            with open(path + ".tmp", "w", encoding="utf-8") as f:
+                f.write("\n".join(keep + [want]) + "\n")
+            os.replace(path + ".tmp", path)
+            log("mDNS: also", self.PRINTER_HOST, "->", ip)
+            subprocess.run(["avahi-daemon", "--reload"], capture_output=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            if not self.warned:
+                log("mDNS: cannot write", path, e)
+                self.warned = True
+            return False
+        return True
+
 
 # =============================================================================== web server
+def error_code(err):
+    """A short code for a refusal, next to its text: SpinSlicer shows its own words for it, in its language."""
+    if not err:
+        return None
+    e = str(err)
+    for start, code in (("busy", "busy"), ("no such video", "no_file"), ("projector not connected", "no_hdmi"),
+                        ("видео для другого направления", "reversed_mpv"), ("прошивка платы", "old_board"),
+                        ("видео в .spin повреждено", "bad_file"), ("unknown host name", "foreign"),
+                        ("request from another site", "foreign"), ("Content-Type", "foreign")):
+        if e.startswith(start):
+            return code
+    if e == Printer.NO_SCREEN:
+        return "no_screen"
+    return "other"
+
+
+class BadRequest(ValueError):
+    """A request that does not make sense: 400 with this text, never a dropped connection."""
+
+
+def host_ok(host, own_names=()):
+    """The Host header names this printer the way a person or SpinSlicer does: an IP address, a .local
+    name, localhost or the machine's own name. Anything else is a page from the internet that made
+    its domain point at this printer (DNS rebinding) and must not drive it."""
+    h = (host or "").strip().lower()
+    if h.startswith("["):  # [IPv6]:port
+        h = h[1:h.find("]")] if "]" in h else h
+    elif h.count(":") == 1:
+        h = h.rsplit(":", 1)[0]
+    if not h:
+        return True  # HTTP/1.0 without Host: a local tool
+    try:
+        import ipaddress
+        ipaddress.ip_address(h)
+        return True
+    except ValueError:
+        pass
+    return h == "localhost" or h.endswith(".local") or h in {n.lower() for n in own_names if n}
+
+
+def foreign_request(method, headers, own_names=()):
+    """Why a request that changes something must be refused (None = it may go on).
+
+    A page open in a browser on the same network could otherwise start a print or turn the light on:
+    a cross-site fetch() with a "simple" body needs no permission. The printer's own page and
+    SpinSlicer send JSON from the same origin (or no Origin at all), so they pass."""
+    if not host_ok(headers.get("Host"), own_names):
+        return "unknown host name"
+    site = (headers.get("Sec-Fetch-Site") or "").lower()
+    if site in ("cross-site", "same-site"):
+        return "request from another site"
+    origin = headers.get("Origin")
+    if origin == "null":
+        return "request from another site"
+    if origin:
+        o = urllib.parse.urlparse(origin)
+        if o.netloc.lower() != (headers.get("Host") or "").lower():
+            return "request from another site"
+    if method == "POST":
+        ctype = (headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            return "Content-Type must be application/json"
+    return None
+
+
+def num(b, key, default=None, lo=None, hi=None, kind=float):
+    """b[key] as a number (or default when absent / null); BadRequest on text, lists and the like."""
+    v = b.get(key, default)
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, float, str)):
+        raise BadRequest(f"{key}: нужно число")
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        raise BadRequest(f"{key}: нужно число")
+    if x != x or x in (float("inf"), float("-inf")):
+        raise BadRequest(f"{key}: нужно число")
+    if lo is not None:
+        x = max(lo, x)
+    if hi is not None:
+        x = min(hi, x)
+    return int(round(x)) if kind is int else x
+
+
+def text(b, key, default=""):
+    v = b.get(key, default)
+    if v is None:
+        return default
+    if not isinstance(v, str):
+        raise BadRequest(f"{key}: нужна строка")
+    return v
+
+
 class Handler(BaseHTTPRequestHandler):
     app = None  # set in main()
     protocol_version = "HTTP/1.1"
@@ -2424,14 +2776,42 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > 1 << 20:
-            return {}
+    def _length(self):
         try:
-            return json.loads(self.rfile.read(n) or b"{}")
+            n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
-            return {}
+            raise BadRequest("bad Content-Length")
+        if n < 0:
+            raise BadRequest("bad Content-Length")
+        return n
+
+    def _body(self):
+        """The JSON object of a POST. Not JSON, or not an object ([1, 2], "x") = BadRequest."""
+        n = self._length()
+        if n > 1 << 20:
+            raise BadRequest("body too large")
+        raw = self.rfile.read(n) if n else b""
+        try:
+            b = json.loads(raw or b"{}")
+        except ValueError:
+            raise BadRequest("body is not JSON")
+        if not isinstance(b, dict):
+            raise BadRequest("body must be a JSON object")
+        return b
+
+    def _guarded(self, method, fn):
+        """Refuse requests from other sites; answer a bad request with 400 instead of a dropped line."""
+        why = foreign_request(method, self.headers, (socket.gethostname(), socket.gethostname() + ".local"))
+        if why:
+            log("refused", method, self.path, "-", why, self.headers.get("Origin") or "")
+            self.close_connection = True  # the body (if any) is not read
+            return self._json({"ok": False, "error": why, "code": "foreign"},
+                              415 if why.startswith("Content-Type") else 403)
+        try:
+            return fn()
+        except BadRequest as e:
+            self.close_connection = True
+            return self._json({"ok": False, "error": str(e), "code": "bad_request"}, 400)
 
     def do_GET(self):
         a = self.app
@@ -2450,7 +2830,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/history":  # every print with its plan, correction and "how did it come out"
             p = a.printer
             return self._json({"api": API_VERSION, "printer_id": p.settings["printer_id"],
-                               "factor": p.settings["factor"], "prints": p.history})
+                               "factor": p.settings["factor"], "resin_factors": p.settings.get("resin_factors") or {},
+                               "prints": p.history})
         if u.path == "/api/events":  # Server-Sent Events: live state twice a second
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -2466,12 +2847,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
         self._json({"error": "not found"}, 404)
 
-    def do_PUT(self):  # upload: PUT /api/files/<name>, body = the video or the .spin file
+    def do_PUT(self):
+        return self._guarded("PUT", self._put)
+
+    def do_DELETE(self):
+        return self._guarded("DELETE", self._delete)
+
+    def do_POST(self):
+        return self._guarded("POST", self._post)
+
+    def _put(self):  # upload: PUT /api/files/<name>, body = the video or the .spin file
         a = self.app
         u = urllib.parse.urlparse(self.path)
         if not u.path.startswith("/api/files/"):
             return self._json({"error": "not found"}, 404)
-        n = int(self.headers.get("Content-Length") or 0)
+        n = self._length()
         if n <= 0 or n > 4 << 30:
             return self._json({"error": "bad size"}, 400)
         name = safe_name(u.path[len("/api/files/"):])
@@ -2508,7 +2898,7 @@ class Handler(BaseHTTPRequestHandler):
         log("uploaded", name)
         self._json({"ok": True, "name": name, "info": a.printer.annotate([info])[0]})
 
-    def do_DELETE(self):
+    def _delete(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         if u.path == "/api/files":
@@ -2516,30 +2906,36 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": ok})
         self._json({"error": "not found"}, 404)
 
-    def do_POST(self):
+    def _post(self):
         a = self.app
         p = a.printer
         u = urllib.parse.urlparse(self.path)
         b = self._body()
         if u.path == "/api/print":  # "confirm": true = SpinSlicer: wait for a yes on the printer's screen
-            args = (b.get("id", ""), b.get("revs"), b.get("factor"), b.get("delay_s"))
+            args = (text(b, "id"), num(b, "revs", lo=1, hi=100000, kind=int), num(b, "factor", lo=0.05, hi=20),
+                    num(b, "delay_s", lo=0, hi=600))
             err = p.ask(*args) if b.get("confirm") else p.start(*args)
-            return self._json({"ok": err is None, "error": err, "request": p.request_view()},
+            return self._json({"ok": err is None, "error": err, "code": error_code(err), "request": p.request_view()},
                               409 if err == p.NO_SCREEN else 200)
         if u.path == "/api/plan":  # what a print would be with these settings (for the web form)
-            f, _ = a.lib.resolve(b.get("id", ""))
+            f, _ = a.lib.resolve(text(b, "id"))
             if not f or not f.get("rpm"):
                 return self._json({"error": "no such video"}, 404)
-            return self._json(p.plan_for(f, b.get("revs"), b.get("factor")))
+            return self._json(p.plan_for(f, num(b, "revs", lo=1, hi=100000, kind=int), num(b, "factor", lo=0.05, hi=20)))
         if u.path == "/api/result":
-            pct = p.result(b.get("result", ""))
+            pct = p.result(text(b, "result"))
             return self._json({"ok": pct is not None, "factor_pct": pct})
         if u.path == "/api/settings":
             for k in ("warmup_min", "delay_s"):
-                if k in b:
-                    p.settings[k] = max(0.0, min(60.0, float(b[k])))
-            if "factor" in b:  # exposure correction, same range as the feedback after a print
-                p.settings["factor"] = round(max(0.3, min(3.0, float(b["factor"]))), 4)
+                if b.get(k) is not None:
+                    p.settings[k] = num(b, k, lo=0.0, hi=60.0)
+            if b.get("factor") is not None:  # the general exposure correction (projector settings card)
+                p.settings["factor"] = round(num(b, "factor", lo=0.3, hi=3.0), 4)
+            rf = b.get("resin_factor")  # {"resin_id": …, "value": 1.0}: SpinSlicer applied it to the dose
+            if rf is not None:
+                if not isinstance(rf, dict) or not text(rf, "resin_id"):
+                    raise BadRequest("resin_factor: {resin_id, value}")
+                p.reset_resin_factor(text(rf, "resin_id"), num(rf, "value", 1.0, lo=0.3, hi=3.0))
             p.save_settings()
             return self._json({"ok": True, "settings": p.settings})
         if u.path == "/api/printer":
@@ -2548,19 +2944,21 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/stop":
             p.stop()
             return self._json({"ok": True})
+        if u.path == "/api/request/cancel":
+            return self._json({"ok": p.cancel_request()})
         if u.path == "/api/motor":
-            err = p.motor(bool(b.get("on")), b.get("rpm"))
+            err = p.motor(bool(b.get("on")), num(b, "rpm", lo=0, hi=60))
             return self._json({"ok": err is None, "error": err})
         if u.path == "/api/revs":
-            a.lib.set_revs(b.get("id", ""), b.get("revs", 1))
+            a.lib.set_revs(text(b, "id"), num(b, "revs", 1, lo=0.01, hi=100000))
             return self._json({"ok": True})
         if u.path == "/api/projector":
-            err = p.show_pattern(b.get("pattern", "black"))
+            err = p.show_pattern(text(b, "pattern", "black"))
             return self._json({"ok": err is None, "error": err})
         if u.path == "/api/calibration":
-            p.calibrate(b.get("offset_px"), b.get("vial_px"))
+            p.calibrate(num(b, "offset_px", lo=-400, hi=400, kind=int), num(b, "vial_px", lo=20, hi=4000, kind=int))
             if b.get("show"):
-                p.show_pattern(b["show"])
+                p.show_pattern(text(b, "show"))
             return self._json({"ok": True, "settings": p.settings})
         self._json({"error": "not found"}, 404)
 
@@ -2625,6 +3023,7 @@ def main():
                 app.esp.greeting = g
                 app.esp.hello()
                 log("address:", url, f"({host}.local)")
+            app.mdns.alias(ip, host)  # spinprinter.local too, whatever the host is called
             publish_mdns()  # the name follows the host name until it is set on the web page
             time.sleep(15)
 

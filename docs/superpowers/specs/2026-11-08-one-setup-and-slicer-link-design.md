@@ -34,7 +34,7 @@ Changes:
 ## 2. Print started from the slicer, confirmed on the printer
 
 - `POST /api/print` gets `"confirm": true`. The Pi then does not start: it holds a pending job
-  and sends the board `ASK <index> <revs> <minutes> <name>`.
+  and sends the board `ASK <revs> <seconds> <name>` (as built: turns, print time in seconds, file name).
 - The board shows a card: name, turns, time, "Print?". Joystick right / press = `GO`,
   left = `NO`. The Pi answers `GO` by starting the job, `NO` by dropping it.
 - A pending job is dropped after 10 minutes, or when another print starts.

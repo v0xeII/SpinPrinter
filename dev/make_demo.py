@@ -65,7 +65,7 @@ def main():
     n = min(len(rows), len(raw) // (W * H * 3))
     f_title, f_cap, f_small = font(26, True), font(17, True), font(15)
     cap_esp = "ESP32-S3 screen (the real firmware UI)" if lang == "en" else "экран ESP32-S3 (настоящий интерфейс)"
-    cap_proj = "projector: the frame for the vial angle" if lang == "en" else "проектор: кадр по углу флакона"
+    cap_proj = "projector: the frame for the vial angle" if lang == "en" else "проектор: кадр по углу колбы"
     CW, CH = 1200, 470
     sx, sy, sc = 40, 70, 2          # screen x2
     px, py, pw, ph = 760, 92, 400, 250
@@ -83,7 +83,7 @@ def main():
         d.text((px, py + ph + 18), cap_proj, fill=DIM, font=f_cap)
         state = ("light on" if lit else "dark") if lang == "en" else ("свет" if lit else "темно")
         d.text((px, py + ph + 44), f"vial {angle % 360:5.1f}°  ·  {state}" if lang == "en"
-               else f"флакон {angle % 360:5.1f}°  ·  {state}", fill=HOT if lit else DIM, font=f_small)
+               else f"колба {angle % 360:5.1f}°  ·  {state}", fill=HOT if lit else DIM, font=f_small)
         img.save(os.path.join(work, f"f{k:04d}.png"))
         k += 1
     fps = FPS_IN // STEP

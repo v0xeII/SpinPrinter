@@ -125,7 +125,7 @@ struct PageView {
 };
 
 // ================================================================ state
-enum ScreenId { SC_BOOT, SC_MENU, SC_SETUP, SC_PRINT, SC_DONE, SC_CONNECT, SC_ASK, SC_WIZ };
+enum ScreenId { SC_BOOT, SC_MENU, SC_SETUP, SC_PRINT, SC_DONE, SC_CONNECT, SC_ASK, SC_WIZ, SC_ERR };
 
 static UiHal H;
 static Settings S;
@@ -180,12 +180,33 @@ static bool qrOk = false;
 struct FileEntry { char name[64]; float rpm; bool usb; float planRevs; float tol; float revS; bool cadOk; };
 static const int MAX_FILES = 32;  // SpinPi sends at most this many
 static FileEntry files[MAX_FILES];
-static int nFiles = 0, nIncoming = 0;
+static int nFiles = 0, nIncoming = 0, nTotal = 0;  // nTotal: all of SpinPi's files (it sends 32 at most)
 static bool listing = false;
 static int knownVideos = -1;  // from the last list the Pi sent; -1 = not asked yet
 static float listAskedT = -10;
 static float defFactor = 0, defDelay = 3;
 static int defTurns = 5;
+static bool speedFix = false;  // FL BEGIN: SpinPi shows frames by angle, so the speed makes up a fraction
+
+// The same sum as SpinPi's plan_for: the speed that gives `need` turns' dose in `turns` whole turns
+// (at most 20 % off the video's speed, within the motor's range), or 0 when there is none.
+static float speedFor(const FileEntry& f, int turns, float need) {
+  if (!speedFix || need <= 0 || turns < 1 || f.rpm <= 0) return 0;
+  float r = f.rpm * turns / need;
+  if (fabsf(r / f.rpm - 1.f) > 0.2001f || r < RPM_MIN || r > RPM_MAX) return 0;
+  return r;
+}
+// whole turns for the plan: the nearest that the speed can make exact, else simply the nearest
+static int bestTurns(const FileEntry& f, float need) {
+  int near = (int)lroundf(need);
+  if (near < 1) near = 1;
+  int cand[3] = {near, near - 1, near + 1};
+  if (fabsf(cand[2] - need) < fabsf(cand[1] - need)) { cand[1] = near + 1; cand[2] = near - 1; }
+  for (int t : cand)
+    if (t >= 1 && speedFor(f, t, need) > 0) return t;
+  return near;
+}
+static float needTurns(const FileEntry& f, float factorPct) { return f.planRevs * (1 + factorPct / 100.f); }
 // print setup
 static int suFile = 0, suSel = 3;
 static int suTurns = 5;
@@ -209,6 +230,11 @@ static float stopAskT = -10;  // when ← was pressed once on the print screen: 
 static char askName[64] = "";
 static int askTurns = 0, askSec = 0;
 static bool askSent = false;
+static char askWarn[2][72];      // ASKW lines: what SpinPi knows is off about this print
+static int askWarnN = 0;
+static float askT = 0;           // when the question came: it goes after 10 minutes (SpinPi ASK_TIMEOUT_S)
+static char errText[160] = "";   // the error screen's text (STATE ERROR <why>)
+static int mdir = -1;            // MDIR from SpinPi: 1 = the vial turns counter-clockwise seen from above, 0 = clockwise
 
 // what the Raspberry tells about itself (SYS line, every ~10 s); -1 / "" = not known
 static char sysIp[24] = "";
@@ -473,7 +499,7 @@ static void itemValue(ItemId it, char* b, size_t n) {
     case I_CONNECT: snprintf(b, n, "%s", qrOk ? "QR" : "—"); break;
     case I_ROT: snprintf(b, n, "%s", motorOn ? T(S_ON) : T(S_OFF)); break;
     case I_SPEED: fmt2(r, sizeof r, S.rpm); snprintf(b, n, "%s", r); break;
-    case I_DIR: snprintf(b, n, "%s", S.dirInv ? T(S_CCW) : T(S_CW)); break;
+    case I_DIR: snprintf(b, n, "%s", (mdir >= 0 ? mdir : S.dirInv) ? T(S_CCW) : T(S_CW)); break;
     case I_ACCEL: snprintf(b, n, "%.0f", (double)S.accel); break;
     case I_MICRO: snprintf(b, n, "1/%d", S.micro); break;
     case I_STEPS: snprintf(b, n, "%d", S.stepsRev); break;
@@ -606,6 +632,13 @@ static void applyMotorCfg() {
   cfgPending = false;
 }
 
+// SpinPi keeps which way the vial turns (it decides from it whether the frames go backwards) and the
+// gear (SpinSlicer reads both). It hears every change made here, so the two never disagree.
+static void tellPiCfg(bool flipped) {
+  if (flipped && mdir >= 0) mdir = !mdir;
+  sendf("EV CFG DIR %d GEAR %.4f", S.dirInv, (double)S.gear);
+}
+
 static void setMotor(bool on) {
   motorOn = on;
   if (!on && cfgPending) { H.motorConfig(S); cfgPending = false; }
@@ -674,10 +707,7 @@ static void changeValue(ItemId it, int dir) {
       changed = v != suFactor;
       suFactor = v;
       FileEntry& f = files[suFile];
-      if (changed && f.planRevs > 0 && !suManual) {
-        int t = (int)lroundf(f.planRevs * (1 + suFactor / 100.f));
-        suTurns = t < 1 ? 1 : t;
-      }
+      if (changed && f.planRevs > 0 && !suManual) suTurns = bestTurns(f, needTurns(f, suFactor));
       break;
     }
     case I_SU_DELAY: { float v = clampf(suDelay + dir, 0, 60); changed = v != suDelay; suDelay = v; break; }
@@ -702,7 +732,7 @@ static void changeValue(ItemId it, int dir) {
       float v = roundf(clampf(S.gear + dir * (fast < 6 ? 0.01f : 0.1f), 0.1f, 50.f) * 100.f) / 100.f;
       changed = v != S.gear;
       S.gear = v;
-      if (changed) applyMotorCfg();
+      if (changed) { applyMotorCfg(); tellPiCfg(false); }
       break;
     }
     case I_BRIGHT: {
@@ -760,8 +790,7 @@ static void openSetup(int i) {
   suDelay = defDelay;
   suManual = false;
   if (files[i].planRevs > 0) {
-    int t = (int)lroundf(files[i].planRevs * (1 + suFactor / 100.f));
-    suTurns = t < 1 ? 1 : t;
+    suTurns = bestTurns(files[i], needTurns(files[i], suFactor));
   } else {
     suTurns = defTurns;
   }
@@ -824,6 +853,7 @@ static void wizKey(Key k) {
         setMotor(false);
         S.dirInv = !S.dirInv;
         H.motorConfig(S);
+        tellPiCfg(true);
         setMotor(true);
         hop();
         break;
@@ -850,7 +880,10 @@ static void activate() {
       if (piOk()) pushPage(PG_FILES);
       else { say(T(S_NEED_PI)); mood(MOOD_SAD, 1.8f); }
       break;
-    case I_FILE: if (nFiles > 0) openSetup(pv.sel); break;
+    case I_FILE:  // a file SpinPi cannot print (rpm 0) only says why
+      if (nFiles > 0 && files[pv.sel].rpm <= 0) { say(files[pv.sel].name, 5); mood(MOOD_SAD, 1.5f); }
+      else if (nFiles > 0) openSetup(pv.sel);
+      break;
     case I_CONNECT: go(SC_CONNECT); break;
     case I_SETTINGS: pushPage(PG_SETTINGS); break;
     case I_G_DISPLAY: pushPage(PG_DISPLAY); break;
@@ -918,7 +951,7 @@ static void activate() {
     case I_P_FOCUS: H.send("EV PATTERN focus"); projLit = true; break;
     case I_P_CIRCLE: H.send("EV PATTERN circle"); projLit = true; break;
     case I_ROT: setMotor(!motorOn); say(motorOn ? T(S_SPINNING) : T(S_STOPPED)); break;
-    case I_DIR: S.dirInv = !S.dirInv; applyMotorCfg(); H.save(S); say(T(S_SAVED), 1.2f); break;
+    case I_DIR: S.dirInv = !S.dirInv; applyMotorCfg(); tellPiCfg(true); H.save(S); say(T(S_SAVED), 1.2f); break;
     case I_ONEREV: if (motorOn) setMotor(false); H.motorZero(); H.motorMove(360, S.rpm); break;
     case I_ZERO: H.motorZero(); say(T(S_ZEROED)); break;
     case I_LANG: S.lang = 1 - S.lang; H.save(S); say(T(S_SAVED), 1.2f); break;
@@ -1027,16 +1060,19 @@ void ui_key(Key k, uint32_t nowMs) {
       if (k == K_OK) { askSent = true; H.send("EV GO"); hop(6); }
       else if (k == K_BACK) { H.send("EV NO"); go(SC_MENU); say(T(S_ASK_NO)); }
       break;
+    case SC_ERR:
+      if (k == K_OK || k == K_BACK) go(SC_MENU);
+      break;
     case SC_DONE:
       // the three answers are a column: ↑↓ choose, → sends the one lit up, ← skips. (They were a
       // row chosen with ↑↓: pushing right to reach "Over" sent "Good" at once.)
       if (k == K_UP || k == K_DOWN) {
         int n = doneSel + (k == K_DOWN ? 1 : -1);
-        if (n >= 0 && n <= 2) doneSel = n;
+        if (n >= 0 && n <= 3) doneSel = n;
         else hop(-2);
       } else if (k == K_OK) {
         static const char* R[3] = {"under", "ok", "over"};
-        sendf("EV RESULT %s", R[doneSel]);
+        if (doneSel < 3) sendf("EV RESULT %s", R[doneSel]);  // the 4th row: "not sure", nothing is sent
         go(SC_MENU);
       } else {
         go(SC_MENU);
@@ -1152,14 +1188,35 @@ void ui_line(const char* line, uint32_t nowMs) {
       if (skipList) return;
       float fac = 0, d = 3;
       int dt = 5;
-      sscanf(a + 5, "%d %f %f %d", &nIncoming, &fac, &d, &dt);
+      int fix = 0;
+      nTotal = 0;
+      sscanf(a + 5, "%d %f %f %d %d %d", &nIncoming, &fac, &d, &dt, &fix, &nTotal);
+      speedFix = fix != 0;
       defFactor = fac;
       defDelay = d;
       defTurns = dt;
       nFiles = 0;
+      // every row empty first: a line lost on the way must not leave the last list's file under its
+      // number (EV PRINT sends the number, and it would print the wrong video)
+      for (int k = 0; k < MAX_FILES; k++) { files[k].name[0] = 0; files[k].rpm = 0; }
     } else if (skipList) {
       if (!strncmp(a, "END", 3)) skipList = false;
     } else if (!strncmp(a, "END", 3)) {
+      static int retries = 0;
+      bool gap = nFiles < nIncoming;
+      for (int k = 0; k < nFiles; k++) gap = gap || !files[k].name[0];
+      if (gap && retries < 2) {  // a row did not come: ask for the whole list again
+        retries++;
+        nFiles = 0;
+        H.send("EV LIST");
+        return;
+      }
+      retries = 0;
+      if (gap) {  // still holes: keep only the rows before the first one
+        int k = 0;
+        while (k < nFiles && files[k].name[0]) k++;
+        nFiles = k;
+      }
       listing = false;
       knownVideos = nFiles;
     } else {
@@ -1206,11 +1263,17 @@ void ui_line(const char* line, uint32_t nowMs) {
     int used = 0;
     if (sscanf(a, "%d %d %n", &askTurns, &askSec, &used) >= 2) {
       copyArg(askName, sizeof askName, a + used);
-      if (screen != SC_ASK) beep(SND_ASK);
+      if (screen != SC_ASK) { beep(SND_ASK); askT = now; askWarnN = 0; }
       go(SC_ASK);
       mood(MOOD_HAPPY, 1.5f);
       hop(6);
     }
+    return;
+  } else if (!strncmp(line, "ASKW ", 5)) {  // a warning about the print the question is about (after ASK)
+    if (askWarnN < 2) copyArg(askWarn[askWarnN++], sizeof askWarn[0], line + 5);
+    return;
+  } else if (!strncmp(line, "MDIR ", 5)) {  // which way the vial turns, as SpinPi knows it: cw / ccw
+    mdir = !strncmp(line + 5, "ccw", 3) ? 1 : 0;
     return;
   } else if (!strncmp(line, "TURNS ", 6)) {
     turnsTotal = atoi(line + 6);
@@ -1237,9 +1300,9 @@ void ui_line(const char* line, uint32_t nowMs) {
     else if (!strncmp(st, "DONE", 4)) { if (screen != SC_DONE) beep(SND_DONE); go(SC_DONE); }
     else if (!strncmp(st, "IDLE", 4)) { if (screen == SC_PRINT) { go(SC_MENU); say(T(S_STOPPED)); } }
     else if (!strncmp(st, "ERROR", 5)) {
-      if (screen == SC_PRINT || screen == SC_SETUP || screen == SC_ASK) go(SC_MENU);
-      snprintf(b, sizeof b, "%s%s%s", T(S_ERROR), st[5] ? ": " : "", st[5] ? st + 6 : "");
-      say(b, 4);
+      // its own screen until a button: a toast for 4 s was missed by whoever looked at the vial
+      copyArg(errText, sizeof errText, st[5] ? st + 6 : T(S_ERROR));
+      go(SC_ERR);
       mood(MOOD_SAD, 4);
       beep(SND_ERR);
     }
@@ -1367,6 +1430,28 @@ static void drawHomeCard(Canvas& c, float a, float sel) {
 }
 
 // ================================================================ drawing pieces
+// "Settings › Motor", "Print", "Connect": what the top bar says on this screen
+static const char* topTitle() {
+  static char t[64];
+  t[0] = 0;
+  if (screen == SC_MENU) {
+    static const ItemId GROUP[] = {I_NONE, I_NONE, I_G_MOTOR, I_G_DISPLAY, I_G_PROJ, I_G_SYSTEM, I_G_SOUND, I_NONE};
+    if (pv.page == PG_FILES) snprintf(t, sizeof t, "%s", T(S_T_FILES));
+    else if (pv.page == PG_SETTINGS) snprintf(t, sizeof t, "%s", T(S_T_SETTINGS));
+    else if (pv.page > PG_SETTINGS && pv.page < PG_FILES)
+      snprintf(t, sizeof t, "%s · %s", T(S_T_SETTINGS), T(ITEM_NAME[GROUP[pv.page]]));
+  } else if (screen == SC_SETUP) {
+    snprintf(t, sizeof t, "%s", T(S_T_FILES));
+  } else if (screen == SC_CONNECT) {
+    snprintf(t, sizeof t, "%s", T(S_CONNECT));
+  } else if (screen == SC_WIZ) {
+    snprintf(t, sizeof t, "%s", T(S_G_WIZARD));
+  }
+  return t;
+}
+
+static int headerRight = 0;  // where the speed / Raspberry chip begin in the top bar (toasts stop there)
+
 static void drawTopBar(Canvas& c) {
   bool ok = piOk();
   const char* pt = ok ? T(S_PI_OK) : T(S_PI_NO);
@@ -1374,14 +1459,23 @@ static void drawTopBar(Canvas& c) {
   bool spin = rpm > 0.005f || motorOn;
   char r[16];
   fmt2(r, sizeof r, rpm);
-  c.text(F_SM, 12, 17, "SpinSlicer", PINK);
   int w = Canvas::textWidth(F_SM, pt) + 24;
+  drawLogo(c, 15, 13.5f, 15, 1, 0);
+  const char* title = topTitle();
+  if (title[0]) {
+    char tt[64];
+    int room = L.W - 8 - w - 28 - (spin ? Canvas::textWidth(F_SM, r) + 34 : 8);
+    fitText(F_SM, title, tt, sizeof tt, room);
+    c.text(F_SM, 28, 18, tt, LIGHT);
+  }
   int x = L.W - 8 - w;
   c.fillRoundRect(x, 5, w, 17, 8.5f, PANEL);
   c.fillCircle(x + 10, 13.5f, 3.2f, ok ? PINK : FAINT, ok ? 0.6f + 0.4f * sinf(now * 3) : 1);
   c.text(F_SM, x + 17, 18, pt, ok ? LIGHT : DIM);
+  headerRight = x;
   if (spin) {
     int mx = x - 12 - Canvas::textWidth(F_SM, r);
+    headerRight = mx - 16;
     c.text(F_SM, mx, 18, r, LIGHT);
     float a = angleNow() * 0.0174533f;
     c.ring(mx - 10, 13, 5, 1.6f, FAINT);
@@ -1392,14 +1486,16 @@ static void drawTopBar(Canvas& c) {
 static void drawToast(Canvas& c) {
   if (toast.v < 0.02f || !toastText[0]) return;
   float a = clampf(toast.v, 0, 1);
-  char t[64];
-  fitText(F_SM, toastText, t, sizeof t, L.W - 40);
+  // In the top bar where the title is, never over the speed and the Raspberry chip (it hid them);
+  // under the bar it covered the first row of a list instead.
+  int right = (screen == SC_BOOT || headerRight <= 0) ? L.W - 4 : headerRight - 4;
+  char t[96];
+  fitText(F_SM, toastText, t, sizeof t, right - 4 - 24);
   int tw = Canvas::textWidth(F_SM, t);
   float w = tw + 24, h = 20;
-  float x = L.W / 2.f - w / 2, y = (3.5f) - (1 - a) * 22;
-  if (x < 4) x = 4;
-  // the message has the top line to itself: half over the "Raspberry" chip it looked broken
-  c.fillRect(0, 0, L.W, 25, BG, a);
+  float x = 4, y = 3.5f - (1 - a) * 22;
+  if (screen == SC_BOOT) x = L.W / 2.f - w / 2;
+  c.fillRect(0, 0, right, 25, BG, a);
   c.fillRoundRect(x, y, w, h, 10, PANEL, a);
   c.strokeRoundRect(x, y, w, h, 10, 1, HOT, a * 0.8f);
   c.text(F_SM, (int)(x + 12), (int)(y + 14.5f), t, LIGHT, a);
@@ -1447,6 +1543,7 @@ static void drawEditCard(Canvas& c, float fx, float fy, float fw, float tx, floa
   float x = fx + (tx - fx) * e, y = fy + (ty - fy) * e, w = fw + (tw - fw) * e, h = PILL_H + (th - PILL_H) * e;
   int ocx0 = c.cx0, ocy0 = c.cy0, ocx1 = c.cx1, ocy1 = c.cy1;
   c.noClip();
+  c.fillRect(0, 25, L.W, L.H - 25, BG, 0.72f * alpha * clampf(e, 0, 1));
   float rr = PILL_H / 2.f + 5 * clampf(e, 0, 1);
   c.fillRoundRect(x, y, w, h, rr, ACT, alpha);
   int txw = (int)w - 12;  // text width
@@ -1565,8 +1662,22 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
       int ty = (int)(ry + ROW_TY);
       uint16_t vc = lerpColor(DIM, DARK, k);
       if (it == I_FILE) {
-        char v[16], nm[64];
-        fmt2(v, sizeof v, files[i].rpm);
+        char v[24], nm[64];
+        const FileEntry& fe = files[i];
+        if (fe.rpm <= 0) {
+          snprintf(v, sizeof v, "!");  // a file SpinPi cannot print: OK says why
+        } else if (fe.planRevs > 0) {
+          float need = needTurns(fe, defFactor);
+          int tn = bestTurns(fe, need);
+          float rp = speedFor(fe, tn, need);
+          char tm[16];
+          fmtTime(tm, sizeof tm, (int)lroundf(tn * 60.f / (rp > 0 ? rp : fe.rpm)));
+          snprintf(v, sizeof v, "%d · %s", tn, tm);
+        } else {
+          char rv[12];
+          fmt2(rv, sizeof rv, fe.rpm);
+          snprintf(v, sizeof v, "%s %s", rv, T(S_RPM));
+        }
         int vw = Canvas::textWidth(F_SM, v);
         int bw = files[i].usb ? Canvas::textWidth(F_SM, T(S_USB)) + 12 : 0;
         fitText(*FR, files[i].name, nm, sizeof nm, (int)LIST_W - 2 * ROW_PAD - 8 - vw - bw);
@@ -1673,11 +1784,20 @@ static void drawSetup(Canvas& c, float dx, float ca, float dt) {
   const Font* fVal = &F_MD;
   int tx = (int)(12 + dx), tw = L.W - 24;
   // a warning if something will make the dose wrong
-  float dev = f.planRevs > 0 ? 100.f * (suTurns / (f.planRevs * (1 + suFactor / 100.f)) - 1.f) : 0;
+  float need = f.planRevs > 0 ? needTurns(f, suFactor) : 0;
+  float rpmFix = speedFor(f, suTurns, need);
+  float revS = rpmFix > 0 ? 60.f / rpmFix : f.revS;  // the time of one turn as it will be printed
+  float dev = need > 0 ? 100.f * (suTurns * (revS / f.revS) / need - 1.f) : 0;
   float tol = f.tol > 0 ? f.tol : 5.f;
   char warn[64] = "", nm[64], b[64], b2[64];
-  if (!f.cadOk) snprintf(warn, sizeof warn, "%s", T(S_W_CADENCE));
-  else if (f.planRevs > 0 && fabsf(dev) > tol / 2)
+  uint16_t warnC = WARN;  // something will make the dose wrong
+  if (!f.cadOk && !speedFix) snprintf(warn, sizeof warn, "%s", T(S_W_CADENCE));
+  else if (rpmFix > 0) {  // not a warning: what the printer will do
+    char r[16];
+    fmt2(r, sizeof r, rpmFix);
+    snprintf(warn, sizeof warn, "%s %s · %s", r, T(S_RPM), T(S_DOSE_EXACT));
+    warnC = DIM;
+  } else if (need > 0 && fabsf(dev) > tol / 2)
     snprintf(warn, sizeof warn, "%s %+.0f%% · %s ±%.0f%%", T(S_W_DOSE), (double)dev, T(S_PLAN), (double)tol);
   fitText(*fName, f.name, nm, sizeof nm, tw);
   c.text(*fName, tx, (int)nameY, nm, LIGHT, ca);
@@ -1701,7 +1821,7 @@ static void drawSetup(Canvas& c, float dx, float ca, float dt) {
     float k = clampf(1 - fabsf(ry - pillY) / rowH, 0, 1) * (suPill.v < 2.99f ? 1 : 0);
     c.text(F_SM, (int)(rowX + pad + dx + k * 2), (int)ry + 5, T(ITEM_NAME[rows[i]]), lerpColor(ROWTXT, DARK, k), la);
     char v[24];
-    if (i == 0) { fmtTime(v, sizeof v, (int)lroundf(suTurns * f.revS)); snprintf(b, sizeof b, "%d · %s", suTurns, v); }
+    if (i == 0) { fmtTime(v, sizeof v, (int)lroundf(suTurns * revS)); snprintf(b, sizeof b, "%d · %s", suTurns, v); }
     else if (i == 1) snprintf(b, sizeof b, "%+.0f%%", (double)suFactor);
     else snprintf(b, sizeof b, "%.0f %s", (double)suDelay, T(S_SEC));
     c.textRight(*fVal, (int)(rowX + rowW - 10 + dx), (int)ry + 6, b, lerpColor(LIGHT, DARK, k), la);
@@ -1716,7 +1836,7 @@ static void drawSetup(Canvas& c, float dx, float ca, float dt) {
   c.textCentered(F_MD, (int)(bx + bw / 2), (int)(by + bh / 2 + 5), T(S_PRINT_BTN), DARK, la);
   c.textCentered(F_SM, (int)(bx + bw / 2), (int)(by + bh / 2 + 24), "OK", DARK, la * 0.55f * s);
   // the warning on a line of its own, else the hint
-  if (warn[0]) { fitText(F_SM, warn, b2, sizeof b2, L.W - 24); c.text(F_SM, tx, wy, b2, PINK, la); }
+  if (warn[0]) { fitText(F_SM, warn, b2, sizeof b2, L.W - 24); c.text(F_SM, tx, wy, b2, warnC, la); }
   else c.text(F_SM, tx, wy, HT(S_SETUP_HINT), FAINT, la * 0.8f);
   float x, y, w, h;
   editTarget(x, y, w, h);
@@ -1777,50 +1897,68 @@ static void drawReady(Canvas& c, float dx, float a) {
 static void drawPrint(Canvas& c, float dx, float ca) {
   float cx = L.artCx, cy = 100, R = 52;
   float p = clampf(prog.v, 0, 1);
-  float th = 4;
-  c.ring(cx, cy, R, th, PANEL, ca);
-  if (infinite) {
-    float a = now * 1.6f;
-    c.arc(cx, cy, R, th, a, a + 1.2f, PINK, ca);
-  } else if (p > 0.002f) {
-    c.arc(cx, cy, R, th, -1.5708f, -1.5708f + 6.2832f * p, PINK, ca);
-  }
+  bool waiting = waitKind[0] != 0;  // light still off: spin-up, warm-up or dark pause
   char b[48];
   if (infinite) snprintf(b, sizeof b, "∞");
   else snprintf(b, sizeof b, "%d%%", (int)(p * 100 + 0.5f));
+  if (waiting) {
+    // dark: a thin grey ring, nothing lit. (It looked the same as the light being on.)
+    c.ring(cx, cy, R, 1.6f, LINE, ca);
+  } else if (infinite) {
+    c.ring(cx, cy, R, 4, PANEL, ca);
+    float a = now * 1.6f;
+    c.arc(cx, cy, R, 4, a, a + 1.2f, PINK, ca);
+  } else {
+    // light: one arc per turn, filled as the turns go by. A turn is the unit of the dose.
+    int n = turnsTotal > 0 && turnsTotal <= 60 ? turnsTotal : 1;
+    float gap = n > 1 ? fminf(0.08f, 3.1416f / n) : 0, seg = 6.2832f / n;
+    c.glow(cx, cy, R + 6, HOT, 0.06f * ca);
+    for (int i = 0; i < n; i++) {
+      float a0 = -1.5708f + i * seg + gap / 2, a1 = a0 + seg - gap;
+      c.arc(cx, cy, R, 4, a0, a1, PANEL, ca);
+      float f = clampf(p * n - i, 0, 1);
+      if (f > 0.002f) c.arc(cx, cy, R, 4, a0, a0 + (a1 - a0) * f, PINK, ca);
+    }
+  }
   if (shapeOk) {
-    // the part inside the vial: dark at first, lighting up with the dose. The light is on from the end
-    // of the wait; the dot on the inner circle still shows the vial turning.
+    // the part inside the vial: dark at first, lighting up with the dose; the dot turns with the vial
     float ri = R - 10, ang = (float)angleNow() * 0.0174533f - 1.5708f;
     c.ring(cx, cy, ri, 1.2f, LINE, ca);
-    c.fillCircle(cx + cosf(ang) * ri, cy + sinf(ang) * ri, 2.4f, PINK, ca);
+    c.fillCircle(cx + cosf(ang) * ri, cy + sinf(ang) * ri, 2.4f, waiting ? DIM : PINK, ca);
     drawShape(c, cx, cy, FAINT, ca);
-    bool lit = waitKind[0] == 0;
     float k = infinite ? 0.6f : p;
-    float glow = lit ? (0.25f + 0.75f * sqrtf(k)) * (0.88f + 0.12f * sinf(now * 5)) : 0;
+    float glow = !waiting ? (0.25f + 0.75f * sqrtf(k)) * (0.88f + 0.12f * sinf(now * 5)) : 0;
     if (glow > 0.02f) c.glow(cx, cy, R * 0.8f, HOT, 0.10f * glow * ca);
     drawShape(c, cx, cy, PINK, ca * glow);
-    c.textCentered(F_MD, (int)cx, (int)(cy + R + 24), b, LIGHT, ca);
+    c.textCentered(F_MD, (int)cx, (int)(cy + R + 24), b, waiting ? DIM : LIGHT, ca);
   } else {
     drawDial(c, cx, cy, R - 12, ca, false);
-    c.textCentered(F_MD, (int)cx, (int)cy + 6, b, LIGHT, ca);
+    c.textCentered(F_MD, (int)cx, (int)cy + 6, b, waiting ? DIM : LIGHT, ca);
   }
 
   // text column: right of the dial
   int x = (int)(132 + dx), r = L.W - 8;
-  int yName = 46, yBig = 92, yLab = 110, yRpm = 134, yHint = L.H - 8;
+  int yName = 46, yBig = 92, yLab = 110, yRpm = 140, yHint = L.H - 8;
   const Font& big = F_XL;
   char nm[64];
   fitText(F_SM, fileName[0] ? fileName : T(S_PRINTING), nm, sizeof nm, r - x);
   c.text(F_SM, x, yName, nm, DIM, ca);
   char t[24];
-  bool waiting = waitKind[0] != 0;
-  if (waiting) {  // light still off: spin-up, warm-up or dark pause
-    const char* what = !strcmp(waitKind, "warm") ? T(S_WAIT_WARM) : (!strcmp(waitKind, "dark") ? T(S_WAIT_DARK) : T(S_WAIT_SPIN));
+  if (waiting) {
+    // where we are: spin-up → warm-up → pause → light (a long warm-up looked like a hang)
+    int step = !strcmp(waitKind, "warm") ? 1 : (!strcmp(waitKind, "dark") ? 2 : 0);
+    static const Str ST[4] = {S_ST_SPIN, S_ST_WARM, S_ST_DARK, S_ST_LIGHT};
     fmtTime(t, sizeof t, waitSec);
     c.text(big, x - 2, yBig, t, LIGHT, ca * (0.6f + 0.4f * sinf(now * 3)));
-    fitText(F_SM, what, nm, sizeof nm, r - x);
-    c.text(F_SM, x, yLab, nm, PINK, ca);
+    float sw = (r - x - 9) / 4.f;
+    for (int i = 0; i < 4; i++) {
+      float sx = x + i * (sw + 3);
+      uint16_t col = i < step ? DIM : (i == step ? PINK : LINE);
+      c.fillRoundRect(sx, yLab - 9, sw, 3, 1.5f, col, ca * (i == step ? 0.6f + 0.4f * sinf(now * 4) : 1));
+    }
+    snprintf(b, sizeof b, "%s  ·  %s", T(ST[step]), T(ST[step + 1]));
+    fitText(F_SM, b, nm, sizeof nm, r - x);
+    c.text(F_SM, x, yLab + 8, nm, PINK, ca);
   } else {
     fmtTime(t, sizeof t, secLeft);
     c.text(big, x - 2, yBig, t, PINK, ca);
@@ -1842,12 +1980,11 @@ static void drawPrint(Canvas& c, float dx, float ca) {
   }
   if (drops > 0 && !stopping) {
     snprintf(b, sizeof b, "%s: %d", T(S_DROPS), drops);
-    c.text(F_SM, x, yHint, b, PINK, ca);
-  } else {
-    const char* hint = stopping ? T(S_STOPPING) : (S.dark ? T(S_DARKENED) : HT(S_HOLD_STOP));
-    fitText(F_SM, hint, nm, sizeof nm, r - x);
-    c.text(F_SM, x, yHint, nm, stopping ? PINK : FAINT, ca);
+    c.text(F_SM, x, yHint - 18, b, WARN, ca);
   }
+  // how to stop, always in view (it used to appear only after a first press)
+  fitText(F_SM, stopping ? T(S_STOPPING) : HT(S_HOLD_STOP), nm, sizeof nm, r - x);
+  c.text(F_SM, x, yHint, nm, stopping ? PINK : DIM, ca);
 }
 
 static void drawDone(Canvas& c, float dx, float ca, float dt) {
@@ -1858,41 +1995,70 @@ static void drawDone(Canvas& c, float dx, float ca, float dt) {
     p.y += p.vy * dt;
     if (p.y < L.H + 5) c.fillCircle(p.x, p.y, p.r, p.c, 0.9f);
   }
-  static const Str OPT[3] = {S_R_UNDER, S_R_OK, S_R_OVER};
+  static const Str OPT[4] = {S_R_UNDER, S_R_OK, S_R_OVER, S_R_SKIP};
   int x = (int)(LIST_X + 20 + dx);
-  c.text(F_LG, x, 60, T(S_DONE), PINK, ca);
-  c.text(F_SM, x, 82, T(S_HOW), LIGHT, ca * 0.85f);
-  float bx = LIST_X + 12 + dx, pw = L.W - 8 - (LIST_X + 12), ph = 28, by = 98;
-  for (int i = 0; i < 3; i++) {  // the answer moves the exposure correction for the next print
-    float y = by + i * (ph + 6);
+  c.text(F_LG, x, 56, T(S_DONE), PINK, ca);
+  c.text(F_SM, x, 76, T(S_HOW), LIGHT, ca * 0.85f);
+  float bx = LIST_X + 12 + dx, pw = L.W - 8 - (LIST_X + 12), ph = 25, by = 88;
+  for (int i = 0; i < 4; i++) {  // the answer moves the exposure correction for the next print
+    float y = by + i * (ph + 5);
     bool on = i == doneSel;
-    c.fillRoundRect(bx, y, pw, ph, ph / 2, on ? ACT : PANEL, ca);
-    c.text(F_SM, (int)(bx + 14), (int)y + 19, T(OPT[i]), on ? DARK : LIGHT, ca);
-    if (on) c.textRight(F_SM, (int)(bx + pw - 14), (int)y + 19, "→", DARK, ca);
+    c.fillRoundRect(bx, y, pw, ph, ph / 2, on ? ACT : PANEL, ca * (i == 3 && !on ? 0.6f : 1));
+    c.text(F_SM, (int)(bx + 14), (int)y + 17, T(OPT[i]), on ? DARK : (i == 3 ? DIM : LIGHT), ca);
+    if (on) c.textRight(F_SM, (int)(bx + pw - 14), (int)y + 17, "→", DARK, ca);
   }
   char h[64];
   fitText(F_SM, HT(S_DONE_HINT), h, sizeof h, L.W - x - 4);
-  c.text(F_SM, x, L.H - 8, h, FAINT, ca * 0.8f);
+  c.text(F_SM, x, L.H - 8, h, DIM, ca * 0.9f);
 }
 
-// A print sent from SpinSlicer: what it is, and the big pink yes (→) or no (←)
+// A print sent from SpinSlicer. The yes means "the vial is in place": that is what is asked, next to
+// what SpinPi found off about the file, the part's silhouette and the time the question has left.
 static void drawAsk(Canvas& c, float dx, float ca) {
   int x = (int)(LIST_X + 6 + dx), r = L.W - 8;
-  char b[64], t[24];
-  c.text(F_SM, x, 46, T(S_ASK_FROM), DIM, ca);
-  fitText(F_MD, askName, b, sizeof b, r - x);
-  c.text(F_MD, x, 70, b, LIGHT, ca);
+  int textR = shapeOk ? r - 64 : r;
+  char b[72], t[24];
+  c.text(F_SM, x, 44, T(S_ASK_FROM), DIM, ca);
+  fitText(F_MD, askName, b, sizeof b, textR - x);
+  c.text(F_MD, x, 64, b, LIGHT, ca);
   fmtTime(t, sizeof t, askSec);
   if (askTurns > 0) snprintf(b, sizeof b, "%d %s · %s", askTurns, T(S_TURNS_UNIT), t);
   else snprintf(b, sizeof b, "%s", t);
-  c.text(F_SM, x, 92, b, LIGHT, ca * 0.85f);
+  c.text(F_SM, x, 82, b, LIGHT, ca * 0.85f);
+  if (shapeOk) {
+    c.ring(r - 30, 64, 29, 1.2f, LINE, ca);
+    drawShape(c, r - 30, 64, PINK, ca * 0.9f);
+  }
+  int y = 104;
+  fitText(F_MD, T(S_ASK_Q), b, sizeof b, r - x);
+  c.text(F_MD, x, y, b, LIGHT, ca);
+  for (int i = 0; i < askWarnN; i++) {
+    y += 16;
+    fitText(F_SM, askWarn[i], b, sizeof b, r - x);
+    c.text(F_SM, x, y, b, WARN, ca);
+  }
   float pulse = askSent ? 0 : 0.5f + 0.5f * sinf(now * 4);
-  float bx = x, by = 112, bw = r - x, bh = 70;
-  c.glow(bx + bw / 2, by + bh / 2, 70, HOT, 0.28f * ca + 0.08f * pulse * ca);
-  c.fillRoundRect(bx, by, bw, bh, 18, ACT, ca);
-  c.strokeRoundRect(bx - 3, by - 3, bw + 6, bh + 6, 21, 1.5f, LIGHT, ca * (0.5f + 0.5f * pulse));
-  c.textCentered(F_LG, (int)(bx + bw / 2), (int)(by + bh / 2 + 8), T(askSent ? S_ASK_STARTING : S_ASK_TITLE), DARK, ca);
-  if (!askSent) c.text(F_SM, x, L.H - 8, T(S_SURE_HINT), FAINT, ca * 0.8f);
+  float bx = x, by = y + 12, bw = r - x, bh = 46;
+  if (by + bh > L.H - 34) by = L.H - 34 - bh;
+  c.glow(bx + bw / 2, by + bh / 2, 60, HOT, 0.22f * ca + 0.06f * pulse * ca);
+  c.fillRoundRect(bx, by, bw, bh, 16, ACT, ca);
+  c.strokeRoundRect(bx - 3, by - 3, bw + 6, bh + 6, 19, 1.5f, LIGHT, ca * (0.5f + 0.5f * pulse));
+  c.textCentered(F_LG, (int)(bx + bw / 2), (int)(by + bh / 2 + 8), T(askSent ? S_ASK_STARTING : S_ASK_BTN), DARK, ca);
+  if (!askSent) {
+    // the question goes after 10 minutes (SpinPi): the bar shows how long it has left
+    float left = clampf(1.f - (now - askT) / 600.f, 0, 1);
+    c.fillRoundRect(bx, by + bh + 6, bw, 2, 1, LINE, ca);
+    c.fillRoundRect(bx, by + bh + 6, bw * left, 2, 1, DIM, ca);
+    c.text(F_SM, x, by + bh + 24, T(S_ASK_HINT), LIGHT, ca * 0.85f);
+  }
+}
+
+// An error stays until a button: the reason in full, and how to go on
+static void drawErr(Canvas& c, float dx, float ca) {
+  int x = (int)(16 + dx), w = L.W - 32;
+  c.text(F_LG, x, 62, T(S_ERR_TITLE), WARN, ca);
+  wrapText(c, F_MD, x, 92, w, 21, errText, LIGHT, ca, 5);
+  c.text(F_SM, x, L.H - 8, T(S_OK_HINT), DIM, ca);
 }
 
 static void drawConnect(Canvas& c, float dx, float ca) {
@@ -2210,7 +2376,8 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   last = now;
   fps += (1.f / dt - fps) * 0.05f;
 
-  pal::theme(S.theme && !(S.dark && screen == SC_PRINT));
+  if (S.dark && screen == SC_PRINT) pal::lamp();  // amber on black next to the resin
+  else pal::theme(S.theme);
   if (screen == SC_BOOT && now > 2.6f) afterBoot();
   if (screen == SC_PRINT && everRx && !piOk()) {  // the Pi vanished mid-print: stop the motor here
     motorOn = false;
@@ -2340,7 +2507,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
       float a = easeOut((now - 0.9f) / 0.6f) * fade;
       char tl[64];
       fitText(F_SM, T(S_TAGLINE), tl, sizeof tl, L.W - 8);
-      c.textCentered(*FBIG, L.W / 2, (int)(ty + (1 - a) * 8), "SpinSlicer", PINK, a);
+      c.textCentered(*FBIG, L.W / 2, (int)(ty + (1 - a) * 8), "SpinPrinter", PINK, a);
       c.textCentered(F_SM, L.W / 2, (int)(sy + (1 - a) * 8), tl, DIM, a);
       break;
     }
@@ -2348,6 +2515,12 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
       if (homeArt.v > 0.08f) drawHomeCard(c, homeArt.v * ca, cardSel.v);
       drawMenu(c, dx, ca);
       if (pv.page == PG_MAIN) drawReady(c, dx, ca * (navDir != 0 ? easeOut(nav.v) : 1));
+      if (pv.page == PG_FILES && nTotal > nFiles && nFiles > 0) {  // the list stops at 32: say where the rest is
+        char mb[64], mf[64];
+        snprintf(mb, sizeof mb, T(S_MORE_FILES), nTotal - nFiles);
+        fitText(F_SM, mb, mf, sizeof mf, (int)LIST_W - 8);
+        c.text(F_SM, (int)(LIST_X + 8 + dx), L.H - 8, mf, DIM, ca);
+      }
       break;
     case SC_SETUP: drawSetup(c, dx, ca, dt); break;
     case SC_PRINT: drawPrint(c, dx, ca); break;
@@ -2355,6 +2528,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
     case SC_CONNECT: drawConnect(c, dx, ca); break;
     case SC_ASK: drawAsk(c, dx, ca); break;
     case SC_WIZ: drawWiz(c, dx, ca); break;
+    case SC_ERR: drawErr(c, dx, ca); break;
   }
   // (on the stacked layouts the edit card covers the dial's band: the dial goes while it is open)
   if (screen == SC_MENU && da > 0.01f) drawDial(c, L.artCx, L.artCy, L.dialR, da);

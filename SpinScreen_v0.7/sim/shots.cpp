@@ -1,4 +1,4 @@
-// Screenshots of every screen at one size, drawn by the real UI (ui.cpp) with a scripted user and
+﻿// Screenshots of every screen at one size, drawn by the real UI (ui.cpp) with a scripted user and
 // a fake Pi. Writes one PPM per screen into a folder; dev/make_shots.py puts them on one sheet.
 //   ./shots out/          (also: axo = Spinny on the main page instead of the card, en = English)
 #include <stdio.h>
@@ -21,7 +21,7 @@ static std::vector<std::string> pending;  // lines from the fake Pi, delivered o
 
 static void hSend(const char* l) {
   if (!strcmp(l, "EV LIST")) {
-    pending.push_back("FL BEGIN 3 0 3 5");
+    pending.push_back("FL BEGIN 3 0 3 5 1 40");  // frames by angle: the speed makes up a fraction; 40 files
     pending.push_back("FL 0 4.00 1 6.40 4.0 15.000 1 benchy_spinslicer.mp4");
     pending.push_back("FL 1 4.00 0 5.35 6.0 15.000 1 lattice_cube_1280x800.mp4");
     pending.push_back("FL 2 9.00 1 -1 -1 6.667 0 opencal_thinker_9rpm.mp4");
@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
   s.theme = light ? 1 : 0;
   ui_init(hal, s, 0);
   line("URL http://192.168.1.42");
-  line("HOST spinslicer.local");
+  line("HOST spinprinter.local");
   line("NET SpinSlicer-5G");
   line("SYS ip=192.168.1.42 wifi=72 temp=48.3 sd=12.4 usb=7.1 prints=14 proj=3.2 hdmi=1");
   frames(1300);
@@ -145,7 +145,7 @@ int main(int argc, char** argv) {
   line("STATE PRINT");
   line("TURNS 6");
   frames(300);
-  line("WAIT 3 dark");
+  line("WAIT 272 warm");
   frames(700);
   shot("print_wait");
   line("PROG 42 51");
@@ -229,7 +229,9 @@ int main(int argc, char** argv) {
   shot("wiz_done");
   key(K_OK, 900);
   // a print sent from SpinSlicer: the yes on the printer
+  sendShape();
   line("ASK 6 214 lattice_cube.spin");
+  line("ASKW файл нарезан для другого принтера");
   frames(900);
   shot("ask");
   // on the print screen one ← only asks, the second stops
@@ -240,5 +242,10 @@ int main(int argc, char** argv) {
   frames(900);
   key(K_BACK, 600);
   shot("print_stop_ask");
+  // an error has a screen of its own until a button
+  frames(3000);
+  line("STATE ERROR видео для другого направления вращения: нужен движок angle (SpinProj)");
+  frames(900);
+  shot("error");
   return 0;
 }

@@ -25,6 +25,11 @@ sudo mkdir -p /etc/avahi/services
 sudo systemctl enable --now avahi-daemon || true
 echo "== 4/5 no login text on the projector (tty1)"
 sudo systemctl disable --now getty@tty1.service || true
+# A Raspberry whose kernel hangs keeps the last frame on the projector: nothing in SpinPi or SpinProj
+# runs any more to put it out. The chip's own watchdog restarts it after 15 s, and the screen goes dark.
+sudo mkdir -p /etc/systemd/system.conf.d
+printf '[Manager]\nRuntimeWatchdogSec=15\nRebootWatchdogSec=2min\n' | sudo tee /etc/systemd/system.conf.d/spinprinter-watchdog.conf >/dev/null
+sudo systemctl daemon-reexec || true
 echo "== 5/5 service"
 sudo cp spinpi.service /etc/systemd/system/spinpi.service
 sudo systemctl daemon-reload

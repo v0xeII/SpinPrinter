@@ -98,7 +98,7 @@ def main():
     port = serial.Serial(sys.argv[1], 115200, timeout=0.2)
     threading.Thread(target=reader, daemon=True).start()
     time.sleep(1.5)
-    for line in ("URL http://192.168.1.42", "HOST spinslicer.local", "NET тест с компьютера", "CAL 0 400"):
+    for line in ("URL http://192.168.1.42", "HOST spinprinter.local", "NET тест с компьютера", "CAL 0 400"):
         send(line)
 
     def pinger():

@@ -4,9 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0a080b">
-<title>SpinSlicer Printer</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<title>SpinPrinter</title>
 <script>
 (function(){ let th=null; try{ th=localStorage.getItem("spinprinter-theme"); }catch(e){}
   if(th!=="light"&&th!=="dark") th=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
@@ -23,9 +21,9 @@
 /* light: the colours of SpinSlicer's light theme */
 :root[data-theme="light"]{
   --bg:#f6f4f0; --panel:#ffffff; --panel2:#ffffff; --line:#ddd8d1; --text:#19171a; --dim:#6c686b; --faint:#a39e98;
-  --pink:#e5452b; --hot:#ee5c43; --dark:#ffffff; --ok:#1e8a4c; --warn:#b86a00;
-  --err:#c62828; --danger-bg:#fbe9e7; --danger-line:#f3c2b9; --tint:rgba(229,69,43,.05); --tick:#ddd8d1;
-  --glow1:rgba(229,69,43,.07); --glow2:rgba(229,69,43,.03); --dial:#f6f4f0;
+  --pink:#d63a75; --hot:#e0558a; --dark:#ffffff; --ok:#1e8a4c; --warn:#b86a00;
+  --err:#c62828; --danger-bg:#fbe9e7; --danger-line:#f3c2b9; --tint:rgba(214,58,117,.05); --tick:#ddd8d1;
+  --glow1:rgba(214,58,117,.07); --glow2:rgba(214,58,117,.03); --dial:#f6f4f0;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
@@ -166,7 +164,7 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
           <circle cx="33" cy="42" r="3" fill="#140a0f"/><circle cx="32" cy="41" r="1" fill="#fff"/>
         </g>
       </svg>
-      <div><h1>SpinSlicer</h1><small data-i="tag">принтер объёмной печати</small></div>
+      <div><h1>SpinPrinter</h1><small data-i="tag">принтер объёмной печати</small></div>
     </div>
     <div class="chips">
       <div class="chip" id="cEsp"><i></i><span>ESP32</span></div>
@@ -237,12 +235,12 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
         <div class="cal">
           <div class="field"><label data-i="center">Центровка, пикс</label><input type="number" id="offN" min="-400" max="400" step="1" value="0"></div>
           <input type="range" id="offR" min="-200" max="200" step="1" value="0">
-          <div class="field"><label data-i="vialw">Ширина флакона, пикс</label><input type="number" id="vialN" min="20" max="1900" step="2" value="400"></div>
+          <div class="field"><label data-i="vialw">Ширина колбы, пикс</label><input type="number" id="vialN" min="20" max="1900" step="2" value="400"></div>
           <input type="range" id="vialR" min="40" max="1200" step="2" value="400">
         </div>
         <div class="field" style="margin-top:12px"><label data-i="factor">Поправка экспозиции, %</label><input type="number" id="expN" min="-70" max="200" step="1" value="0"></div>
         <div class="field" style="margin-top:12px"><label data-i="warmup">Прогрев проектора, мин</label><input type="number" id="warmN" min="0" max="60" step="1" value="5"></div>
-        <p class="note" data-i="projNote">Центровка двигает всё изображение (и при печати), пока линия не совпадёт с осью вращения флакона. Не оставляй смолу под светом!</p>
+        <p class="note" data-i="projNote">Центровка двигает всё изображение (и при печати), пока линия не совпадёт с осью вращения колбы. Не оставляй смолу под светом!</p>
       </section>
     </div>
   </div>
@@ -250,23 +248,23 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
     <h2 data-i="profile">Профиль принтера (для SpinSlicer)</h2>
     <div class="meta" id="profId"></div>
     <div class="field"><label data-i="pName">Имя в сети</label><input class="txt" id="pName" maxlength="40" autocomplete="off"></div>
-    <div class="field"><label data-i="pIrr">Облучённость на оси, мВт/см²</label><input type="number" id="pIrr" min="0" max="1000" step="0.01"></div>
-    <div class="field"><label data-i="pContrast">Контраст проектора</label><input type="number" id="pContrast" min="1" step="1"></div>
-    <div class="field"><label data-i="pDiam">Диаметр флакона, мм</label><input type="number" id="pDiam" min="1" max="500" step="0.1"></div>
-    <div class="field"><label data-i="pWall">Стенка флакона, мм</label><input type="number" id="pWall" min="0" max="50" step="0.01"></div>
+    <div class="field"><label data-i="pIrr">Облучённость на оси, мВт/см²</label><input type="number" id="pIrr" min="0" max="1000" step="0.01" data-ph="dontKnow"></div>
+    <div class="field"><label data-i="pContrast">Контраст проектора</label><input type="number" id="pContrast" min="1" step="1" data-ph="dontKnow"></div>
+    <div class="field"><label data-i="pDiam">Диаметр колбы, мм</label><input type="number" id="pDiam" min="1" max="500" step="0.1"></div>
+    <div class="field"><label data-i="pWall">Стенка колбы, мм</label><input type="number" id="pWall" min="0" max="50" step="0.01"></div>
     <div class="field"><label data-i="pN">Показатель преломления стекла</label><input type="number" id="pN" min="1" max="3" step="0.001"></div>
     <div class="field"><label data-i="pGear">Передача мотора</label><input type="number" id="pGear" min="0.01" max="1000" step="0.01"></div>
-    <div class="field"><label data-i="pDir">Флакон крутится (вид сверху)</label>
+    <div class="field"><label data-i="pDir">Колба крутится (вид сверху)</label>
       <select id="pDir"><option value="ccw_from_top" data-i="ccw">против часовой</option><option value="cw_from_top" data-i="cw">по часовой</option></select></div>
     <div class="row"><button id="pSave" data-i="save">Сохранить</button></div>
-    <p class="note" data-i="profNote">SpinSlicer сам находит принтер в сети и берёт отсюда проектор, флакон и калибровку. Пустое поле: неизвестно, слайсер оставит своё. Направление вращения: если видео нарезано для другого, кадры пойдут в обратном порядке.</p>
+    <p class="note" data-i="profNote">SpinSlicer сам находит принтер в сети и берёт отсюда проектор, колбу и калибровку. Пустое поле: неизвестно, слайсер оставит своё. Направление вращения: если видео нарезано для другого, кадры пойдут в обратном порядке.</p>
   </section>
   <section class="card" style="margin-top:16px">
     <h2 data-i="history">Журнал печатей</h2>
     <div class="hist" id="hist"></div>
     <p class="note"><a href="/api/history" style="color:var(--dim)" data-i="histAll">весь журнал (JSON, его читает SpinSlicer)</a></p>
   </section>
-  <footer id="foot">SpinSlicer · SpinPi</footer>
+  <footer id="foot">SpinPrinter · SpinPi</footer>
 </div>
 
 <div class="sheet" id="sheet">
@@ -293,17 +291,19 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:26px}
 const I18N = {
   ru:{tag:"принтер объёмной печати",projector:"Проектор",videos:"Печати",drop:"Перетащи сюда файл из SpinSlicer",
       drop2:"или нажми, чтобы выбрать · .spin или MP4",motor:"Мотор",
-      profile:"Профиль принтера (для SpinSlicer)",pName:"Имя в сети",pIrr:"Облучённость на оси, мВт/см²",pContrast:"Контраст проектора",pDiam:"Диаметр флакона, мм",pWall:"Стенка флакона, мм",pN:"Показатель преломления стекла",pGear:"Передача мотора",pDir:"Флакон крутится (вид сверху)",ccw:"против часовой",cw:"по часовой",save:"Сохранить",saved:"Сохранено",
-      profNote:"SpinSlicer сам находит принтер в сети и берёт отсюда проектор, флакон и калибровку. Пустое поле: неизвестно, слайсер оставит своё. Направление вращения: если видео нарезано для другого, кадры пойдут в обратном порядке.",
-      histAll:"весь журнал (JSON, его читает SpinSlicer)",reversed:"обратный ход",reversedLong:"Видео нарезано для вращения в другую сторону: кадры пойдут в обратном порядке, деталь выйдет правильной.",otherPrinter:"Нарезано для другого принтера: проверь проектор и флакон.",resin:"смола",planShort:"расчёт",bad:"не печатается",rpm:"об/мин",speed:"Скорость, об/мин",spin:"Крутить",stop:"Стоп",
+      profile:"Профиль принтера (для SpinSlicer)",pName:"Имя в сети",pIrr:"Облучённость на оси, мВт/см²",pContrast:"Контраст проектора",pDiam:"Диаметр колбы, мм",pWall:"Стенка колбы, мм",pN:"Показатель преломления стекла",pGear:"Передача мотора",pDir:"Колба крутится (вид сверху)",ccw:"против часовой",cw:"по часовой",save:"Сохранить",saved:"Сохранено",
+      profNote:"SpinSlicer сам находит принтер в сети и берёт отсюда проектор, колбу и калибровку. Пустое поле: неизвестно, слайсер оставит своё. Направление вращения: если видео нарезано для другого, кадры пойдут в обратном порядке.",
+      histAll:"весь журнал (JSON, его читает SpinSlicer)",reversed:"обратный ход",reversedLong:"Видео нарезано для вращения в другую сторону: кадры пойдут в обратном порядке, деталь выйдет правильной.",otherPrinter:"Нарезано для другого принтера: проверь проектор и колбу.",resin:"смола",planShort:"расчёт",bad:"не печатается",rpm:"об/мин",speed:"Скорость, об/мин",spin:"Крутить",stop:"Стоп",
       proj:"Проектор · настройка",pBlack:"Чёрный",pWhite:"Белый",pGrid:"Сетка",pFocus:"Фокус",pCircle:"Круг",
       exposure:"Время экспозиции, с",
       revs:"Оборотов в видео",cancel:"Отмена",print:"Печать",
-      sIdle:"Готов к печати",sSpin:"Разгоняю флакон…",sPrint:"Печать",sDone:"Готово!",sErr:"Ошибка",
+      sIdle:"Готов к печати",sSpin:"Разгоняю колбу…",sPrint:"Печать",sDone:"Готово!",sErr:"Ошибка",
+      dontKnow:"не знаешь — оставь пустым",whiteAsk:"Белый экран засветит смолу. Колба со смолой убрана?",
+      reqWait:"Ждёт подтверждения на экране принтера",reqCancel:"Отменить",
       left:"осталось",sync:"синхронизация",noEsp:"ESP32 не подключена — подключи её к Raspberry по USB",
       empty:"Пока пусто. В SpinSlicer: «Отправить на принтер», или сохрани .spin и перетащи файл сюда.",
       del:"Удалить?",uploaded:"Загружено",busy:"Принтер занят",printLast:"Печать: ",stopPrint:"Остановить",again:"Ещё раз",
-      frames:"кадров",rev:"оборот",uploading:"Загрузка",turns:"Обороты",tshort:"об.",factor:"Поправка экспозиции, %",warmup:"Прогрев проектора, мин",history:"Журнал печатей",how:"Как получилось?",under:"Недосвет",ok:"Норма",over:"Пересвет",sWait:"Подготовка",wspin:"разгон мотора",wwarm:"прогрев проектора",wdark:"пауза до света",planOf:"Расчёт SpinSlicer",noPlan:"У этого видео нет расчёта SpinSlicer: подбери обороты сам (или экспортируй видео из новой версии SpinSlicer).",turnsOf:"оборот",of:"из",dose:"доза от расчёта",tol:"допуск",cadence:"Частота кадров не делится на частоту экрана: кадры будут показываться неравное время. Экспортируй 30 или 60 к/с.",doseWarn:"Округление до целых оборотов уводит дозу за половину допуска. Поменяй поправку или сделай в SpinSlicer больше оборотов (меньше яркость).",drops:"пропущено кадров",hdmi:"Проектор не подключён по HDMI",warmLeft:"Проектор прогревается",noHist:"Пока пусто",light:"свет",total:"всего",center:"Центровка, пикс",vialw:"Ширина флакона, пикс",untilStop:"До стопа (остановлю сам)",delay:"Пауза до света, с",usb:"USB",elapsed:"прошло",projNote:"Центровка двигает всё изображение (и при печати), пока линия не совпадёт с осью вращения флакона. Не оставляй смолу под светом!"},
+      frames:"кадров",rev:"оборот",uploading:"Загрузка",turns:"Обороты",tshort:"об.",factor:"Поправка экспозиции, %",warmup:"Прогрев проектора, мин",history:"Журнал печатей",how:"Как получилось?",under:"Недосвет",ok:"Норма",over:"Пересвет",sWait:"Подготовка",wspin:"разгон мотора",wwarm:"прогрев проектора",wdark:"пауза до света",planOf:"Расчёт SpinSlicer",noPlan:"У этого видео нет расчёта SpinSlicer: подбери обороты сам (или экспортируй видео из новой версии SpinSlicer).",turnsOf:"оборот",of:"из",dose:"доза от расчёта",tol:"допуск",cadence:"Частота кадров не делится на частоту экрана: кадры будут показываться неравное время. Экспортируй 30 или 60 к/с.",doseWarn:"Округление до целых оборотов уводит дозу за половину допуска. Поменяй поправку или сделай в SpinSlicer больше оборотов (меньше яркость).",drops:"пропущено кадров",hdmi:"Проектор не подключён по HDMI",warmLeft:"Проектор прогревается",noHist:"Пока пусто",light:"свет",total:"всего",center:"Центровка, пикс",vialw:"Ширина колбы, пикс",untilStop:"До стопа (остановлю сам)",delay:"Пауза до света, с",usb:"USB",elapsed:"прошло",projNote:"Центровка двигает всё изображение (и при печати), пока линия не совпадёт с осью вращения колбы. Не оставляй смолу под светом!"},
   en:{tag:"volumetric printer",projector:"Projector",videos:"Prints",drop:"Drop a SpinSlicer file here",
       drop2:"or tap to choose · .spin or MP4",motor:"Motor",
       profile:"Printer profile (for SpinSlicer)",pName:"Network name",pIrr:"Irradiance on the axis, mW/cm²",pContrast:"Projector contrast",pDiam:"Vial diameter, mm",pWall:"Vial wall, mm",pN:"Glass refractive index",pGear:"Motor gear ratio",pDir:"The vial turns (seen from the top)",ccw:"counter-clockwise",cw:"clockwise",save:"Save",saved:"Saved",
@@ -313,6 +313,8 @@ const I18N = {
       exposure:"Exposure time, s",
       revs:"Revolutions in the video",cancel:"Cancel",print:"Print",
       sIdle:"Ready to print",sSpin:"Spinning up the vial…",sPrint:"Printing",sDone:"Done!",sErr:"Error",
+      dontKnow:"not sure — leave it empty",whiteAsk:"A white screen cures the resin. Is the vial with resin out?",
+      reqWait:"Waits for a yes on the printer's screen",reqCancel:"Cancel",
       left:"left",sync:"sync",noEsp:"ESP32 not connected — plug it into the Raspberry via USB",
       empty:"Nothing here yet. In SpinSlicer: “Send to printer”, or save a .spin and drop it here.",
       del:"Delete?",uploaded:"Uploaded",busy:"Printer is busy",printLast:"Print: ",stopPrint:"Stop",again:"Print again",
@@ -324,6 +326,7 @@ const t = k => I18N[lang][k] || k;
 function applyLang(){
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-i]").forEach(e=>e.textContent=t(e.dataset.i));
+  document.querySelectorAll("[data-ph]").forEach(e=>e.placeholder=t(e.dataset.ph));
   $("lang").textContent = lang==="ru" ? "EN" : "RU";
   if(typeof applyTheme==="function") applyTheme();
   render(); renderFiles(); renderProfile();
@@ -385,10 +388,15 @@ function render(){
     if(S.hdmi===false) meta+=`<span style="color:var(--warn)">${t("hdmi")}</span><br>`;
     else if(S.warmup_left_s>0) meta+=`<span style="color:var(--warn)">${t("warmLeft")}: ${fmtT(S.warmup_left_s)}</span><br>`;
     if(st==="error") meta=`<span style="color:var(--err)">${esc(S.msg)}</span><br>`;
+    const rq=S.request;
+    if(rq && rq.state==="waiting_confirm"){
+      meta=`<b>${esc(rq.name)}</b><br><span style="color:var(--warn)">${t("reqWait")}</span><br>`;
+      btns=`<button class="ghost" onclick="cancelRequest()">${t("reqCancel")}</button>`;
+    }
     if(!S.esp) meta+=t("noEsp")+"<br>";
     if(!S.projector && S.projector_err) meta+=`<span style="color:var(--warn)">mpv: ${esc(S.projector_err)}</span><br>`;
     const last=S.settings.last_id && FILES.find(f=>f.id===S.settings.last_id);
-    if(last){ meta+=`${t("printLast")}<b>${esc(last.name)}</b>`; btns=`<button class="big" onclick="openSheet('${encodeURIComponent(last.id)}')">${st==="done"?t("again"):t("print")}</button>`; }
+    if(last && !(rq && rq.state==="waiting_confirm")){ meta+=`${t("printLast")}<b>${esc(last.name)}</b>`; btns=`<button class="big" onclick="openSheet('${encodeURIComponent(last.id)}')">${st==="done"?t("again"):t("print")}</button>`; }
   }
   $("arc").style.strokeDashoffset = 326.7*(1-p);
   $("ringBig").textContent=big; $("ringSub").textContent=sub;
@@ -398,7 +406,7 @@ function render(){
   renderHist();
   if(document.activeElement!==$("warmN")) $("warmN").value=S.settings.warmup_min;
   if(document.activeElement!==$("expN")) $("expN").value=Math.round(100*(S.settings.factor-1));
-  $("foot").textContent=`SpinPi ${S.version}`+(S.esp_version?` · SpinScreen ${S.esp_version}`:"");
+  $("foot").textContent=`SpinPrinter · SpinPi ${S.version}`+(S.esp_version?` · SpinScreen ${S.esp_version}`:"");
 }
 const esc = s => String(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -527,7 +535,10 @@ $("expN").onchange=async()=>{
 // motor + projector
 $("mOn").onclick=async()=>{ const r=await api("/api/motor",{on:true,rpm:+$("rpmSet").value}); if(!r.ok) toast(t("busy")); };
 $("mOff").onclick=async()=>{ const r=await api("/api/motor",{on:false}); if(!r.ok) toast(t("busy")); };
-document.querySelectorAll("[data-p]").forEach(b=>b.onclick=async()=>{ const r=await api("/api/projector",{pattern:b.dataset.p}); if(!r.ok) toast(t("busy")); });
+document.querySelectorAll("[data-p]").forEach(b=>b.onclick=async()=>{
+  if(b.dataset.p==="white" && !confirm(t("whiteAsk"))) return;  // white cures resin
+  const r=await api("/api/projector",{pattern:b.dataset.p}); if(!r.ok) toast(t("busy")); });
+async function cancelRequest(){ await api("/api/request/cancel",{}); }
 let calT=null, calFocus=false;
 function sendCal(show){ clearTimeout(calT); calT=setTimeout(()=>api("/api/calibration",{offset_px:+$("offN").value,vial_px:+$("vialN").value,show}),80); }
 function syncCal(){ if(calFocus||!S) return; const s=S.settings; $("offN").value=s.offset_px; $("offR").value=s.offset_px; $("vialN").value=s.vial_px; $("vialR").value=s.vial_px; }

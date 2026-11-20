@@ -35,7 +35,7 @@ SpinPi and SpinProj by itself on the first start (10–20 minutes, needs interne
 **Any OS:**
 1. **Raspberry Pi Imager** → your Raspberry model → **Raspberry Pi OS Lite (64-bit)** → settings: hostname
    **spinslicer**, a user and password, your Wi-Fi, **SSH on**. Write, put the card in the Raspberry, power on, wait 3 minutes.
-2. Log in from the computer (Windows: PowerShell): `ssh user@spinslicer.local`
+2. Log in from the computer (Windows: PowerShell): `ssh user@spinprinter.local`
 3. One command on the Raspberry (10–20 minutes, then it reboots; run again to update):
    ```
    curl -fsSL https://raw.githubusercontent.com/v0xeII/SpinPrinter/main/SpinPi/get.sh | sudo bash
@@ -52,7 +52,7 @@ sends a `.spin` file: the one-turn video, a picture of the part and the planned 
 screen: **Print** → pick the video → check turns, exposure and pause → the pink **PRINT**. The stick
 is mounted read-only.
 
-**Over Wi-Fi:** open the printer page (QR or `http://spinslicer.local`), drop the `.spin` or video, press
+**Over Wi-Fi:** open the printer page (QR or `http://spinprinter.local`), drop the `.spin` or video, press
 "Print". Uploaded files show up in the list on the printer screen too.
 
 ### The `.spin` file
@@ -99,12 +99,12 @@ The printer also keeps the dose even:
 - **dark spin-up:** the vial spins in the dark first so the resin settles;
 - **frame rate:** if the video fps does not divide the refresh (24 fps on 60 Hz), frames stay up
   2 or 3 refreshes in turn; the printer warns: export 30 or 60 fps;
-- **faults:** no angle from the ESP for 0.3 s → SpinProj switches the light off by itself; the ESP
+- **faults:** no angle from the ESP for 1 s → SpinProj switches the light off by itself; the ESP
   silent for 1 s or the motor 5 % off speed → the print stops. If the Raspberry goes away, the ESP stops the motor;
 - **dropped frames** (missed vsyncs) are counted and shown.
 
 Videos without a plan (older ones, OpenCAL with `_9rpm` in the name) print too: you set the turns.
-Stop a print on the page or on the printer screen (hold OK).
+Stop a print on the page or on the printer screen (tilt left twice: the first only asks).
 
 ## Projector setup
 On the printer screen (Settings → Projector) and on the page:
@@ -142,7 +142,7 @@ top folder: your own build). Progress and errors: `GET /api/state` → `firmware
 ## For developers: HTTP API
 | | |
 |---|---|
-| `PUT /api/files/<name>` | upload a `.spin` or a video (body = the file): `curl -T part.spin http://spinslicer.local/api/files/part.spin`. Answer `{"ok":true,"name":…,"info":…}`; a broken `.spin` → 400 `{"ok":false,"error":…}` |
+| `PUT /api/files/<name>` | upload a `.spin` or a video (body = the file): `curl -T part.spin http://spinprinter.local/api/files/part.spin`. Answer `{"ok":true,"name":…,"info":…}`; a broken `.spin` → 400 `{"ok":false,"error":…}` |
 | `GET /api/files` | the library (`id`: `lib/…` uploaded, `usb/…` on a stick): `format` (`spin`/`video`), frames, fps, rpm, `plan`, `plan_revs`, `tolerance_pct`, `rotation`, `frames_per_rev`, `frame0_angle_deg`, `reversed`, `other_printer`, `warnings`, `resin`, `preview`, `error` |
 | `GET /api/thumb?id=…` | the picture (PNG from the `.spin` or a JPEG frame of the video) |
 | `GET /api/printer` | printer profile: `id`, `name`, `projector` (`width`, `height`, `hz`, `irradiance_mw_cm2`, `contrast`), `vial` (`diameter_mm`, `wall_mm`, `n_glass`), `calibration` (`offset_px`, `center_offset_px`, `vial_width_px`), `motor` (`gear`, `direction`), `software`; unknown = `null` |
