@@ -30,24 +30,8 @@ inline bool lightTheme = false;
 static const uint16_t WHITE = hex(0xFFFFFF);
 static const uint16_t INK = hex(0x170910);  // always dark: QR code modules on their white plate
 
-inline bool lampTheme = false;
-
-// The print screen while "dark while printing" is on: amber on black, a darkroom lamp. The pinks have
-// a fair share of blue, and the screen stands next to the resin.
-static inline void lamp() {
-  if (lampTheme) return;
-  lampTheme = true;
-  lightTheme = false;
-  BG = hex(0x080604); PANEL = hex(0x1A1208); LINE = hex(0x2A1D0C);
-  PINK = hex(0xE08A1E); HOT = hex(0xC86A10); ACT = hex(0xE08A1E);
-  LIGHT = hex(0xF2C27A); DIM = hex(0x9C7440); FAINT = hex(0x5E4628); DARK = hex(0x120A02);
-  ROWTXT = hex(0xD9A860); WARN = hex(0xFFB86B); EDGE = hex(0x4A3214); SUBSEL = hex(0x4A3214);
-  BTN = hex(0x7A5420);
-}
-
 static inline void theme(bool light) {
-  if (light == lightTheme && !lampTheme) return;
-  lampTheme = false;
+  if (light == lightTheme) return;
   lightTheme = light;
   if (light) {  // SpinSlicer LIGHT: paper, ink, the same pink accent as the dark theme, black main actions
     BG = hex(0xF6F4F0); PANEL = hex(0xE7E3DC); LINE = hex(0xDDD8D1);              // bg, surface_alt, border

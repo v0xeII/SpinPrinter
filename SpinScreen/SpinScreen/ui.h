@@ -17,12 +17,11 @@ struct Settings {
   float accel;    // rpm per second
   int dirInv;     // 1 = counter-clockwise
   float gear;     // motor turns per vial turn
-  int dark;       // dim the screen while printing
   int home;       // main page: HOME_CARD (a big PRINT card on top) or HOME_AXO (Spinny at the side)
   int axoColor;   // colour morph (spinny.h MORPH_*)
   int sleepMin = 5;  // backlight off after this many idle minutes (0 = never)
   int wizard = 1;    // 0 = the first-setup wizard has not been through yet (shown after the logo)
-  int theme = 0;     // 0 = dark, 1 = light (the print screen stays dark while "dim while printing" is on)
+  int theme = 0;     // 0 = dark, 1 = light
   int sound = 1;     // buzzer.h SOUND_OFF / SOUND_QUIET / SOUND_LOUD
   int clicks = 0;    // 1 = a soft tick on every button
   int buzzPin = -1;  // the buzzer's GPIO, -1 = none

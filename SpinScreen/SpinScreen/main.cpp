@@ -131,7 +131,6 @@ static void writeSettings(const Settings& s) {
   prefs.putFloat("accel", s.accel);
   prefs.putUChar("dir", s.dirInv);
   prefs.putFloat("gear", s.gear);
-  prefs.putUChar("dark", s.dark);
   prefs.putUChar("home", s.home);
   prefs.putUChar("axoColor", s.axoColor);
   prefs.putUChar("sleep", s.sleepMin);
@@ -237,7 +236,6 @@ void setup() {
   s.accel = prefs.getFloat("accel", MOTOR_ACCEL_RPM_S);
   s.dirInv = prefs.getUChar("dir", 0);
   s.gear = prefs.getFloat("gear", MOTOR_GEAR);
-  s.dark = prefs.getUChar("dark", 1);
   s.home = prefs.getUChar("home", HOME_CARD);  // a new key: every board starts with the card, Spinny is opt-in
   if (s.home >= HOME_COUNT) s.home = HOME_CARD;
   s.axoColor = prefs.getUChar("axoColor", 0);
@@ -258,7 +256,6 @@ void setup() {
   if (!(s.accel >= 1 && s.accel <= 60)) s.accel = MOTOR_ACCEL_RPM_S;
   if (!(s.gear >= 0.1f && s.gear <= 50.f)) s.gear = MOTOR_GEAR;
   s.dirInv = s.dirInv ? 1 : 0;
-  s.dark = s.dark ? 1 : 0;
   if (s.axoColor > 5) s.axoColor = 0;
   if (s.sleepMin != 0 && s.sleepMin != 1 && s.sleepMin != 5 && s.sleepMin != 15 && s.sleepMin != 30) s.sleepMin = 5;
   s.wizard = s.wizard ? 1 : 0;

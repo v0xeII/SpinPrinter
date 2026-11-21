@@ -65,7 +65,7 @@ enum ItemId {
   I_PRINT, I_CONNECT, I_SETTINGS,
   I_P_BLACK, I_P_WHITE, I_P_GRID, I_P_FOCUS, I_P_CIRCLE, I_P_CENTER, I_P_VIAL,
   I_ROT, I_SPEED, I_DIR, I_ACCEL, I_MICRO, I_STEPS, I_GEAR, I_ONEREV, I_ZERO,
-  I_BRIGHT, I_LANG, I_DARK,
+  I_BRIGHT, I_LANG,
   I_REBOOT, I_POWEROFF,
   I_AXO_SHOW, I_AXO_COLOR,
   I_SU_TURNS, I_SU_FACTOR, I_SU_DELAY,  // print setup rows
@@ -81,7 +81,7 @@ static const Str ITEM_NAME[] = {
     S_PRINT, S_CONNECT, S_SERVICE,
     S_P_BLACK, S_P_WHITE, S_P_GRID, S_P_FOCUS, S_P_CIRCLE, S_P_CENTER, S_P_VIAL,
     S_ROTATION, S_SPEED, S_DIRECTION, S_ACCEL, S_MICROSTEP, S_STEPS_REV, S_GEAR, S_ONEREV, S_ZERO,
-    S_BRIGHT, S_LANG, S_DARK,
+    S_BRIGHT, S_LANG,
     S_REBOOT, S_POWEROFF,
     S_AXO_SHOW, S_AXO_COLOR,
     S_SU_TURNS, S_SU_FACTOR, S_SU_DELAY,
@@ -99,7 +99,7 @@ static const ItemId MAIN_ITEMS[] = {I_PRINT, I_CONNECT, I_SETTINGS};
 static const ItemId SETTINGS_ITEMS[] = {I_G_WIZARD, I_G_MOTOR, I_G_PROJ, I_G_DISPLAY, I_G_SOUND, I_G_SYSTEM};
 // rotation and the motor's own settings are one page: the everyday rows first
 static const ItemId MOTOR_ITEMS[] = {I_ROT, I_SPEED, I_DIR, I_ACCEL, I_MICRO, I_STEPS, I_GEAR, I_ONEREV, I_ZERO};
-static const ItemId DISPLAY_ITEMS[] = {I_THEME, I_BRIGHT, I_LANG, I_DARK, I_SLEEP, I_AXO_SHOW, I_AXO_COLOR};
+static const ItemId DISPLAY_ITEMS[] = {I_THEME, I_BRIGHT, I_LANG, I_SLEEP, I_AXO_SHOW, I_AXO_COLOR};
 // the buzzer first: without a pin there is nothing to hear
 static const ItemId SOUND_ITEMS[] = {I_BUZZ, I_SOUND, I_CLICKS};
 static const ItemId PROJ_ITEMS[] = {I_P_BLACK, I_P_WHITE, I_P_GRID, I_P_FOCUS, I_P_CIRCLE, I_P_CENTER, I_P_VIAL};
@@ -392,9 +392,6 @@ static void go(ScreenId s) {
     stopAskT = -10;
     syncMs = -1;
     drops = 0;
-    if (S.dark && !asleep) H.brightness(10);
-  } else if (prev == SC_PRINT && !asleep) {
-    H.brightness(S.bright);
   }
   if (s == SC_SETUP) { suSel = 3; suPill.snap(3); }
   if (s == SC_DONE) {
@@ -509,7 +506,6 @@ static void itemValue(ItemId it, char* b, size_t n) {
     case I_P_VIAL: snprintf(b, n, "%d %s", calVial, T(S_PX)); break;
     case I_BRIGHT: snprintf(b, n, "%d%%", S.bright); break;
     case I_LANG: snprintf(b, n, "%s", T(S_LANGNAME)); break;
-    case I_DARK: snprintf(b, n, "%s", S.dark ? T(S_ON) : T(S_OFF)); break;
     case I_THEME: snprintf(b, n, "%s", T(S.theme ? S_TH_LIGHT : S_TH_DARK)); break;
     case I_SOUND:
       snprintf(b, n, "%s", T(S.sound == SOUND_LOUD ? S_SND_LOUD : (S.sound == SOUND_QUIET ? S_SND_QUIET : S_OFF)));
@@ -967,7 +963,6 @@ static void activate() {
     case I_ONEREV: if (motorOn) setMotor(false); oneTurn(); break;
     case I_ZERO: H.motorZero(); say(T(S_ZEROED)); break;
     case I_LANG: S.lang = 1 - S.lang; H.save(S); say(T(S_SAVED), 1.2f); break;
-    case I_DARK: S.dark = !S.dark; H.save(S); say(T(S_SAVED), 1.2f); break;
     case I_REBOOT: case I_POWEROFF: confirmItem = it; confirm.target = 1; break;
     default:
       if (editable(it)) startEdit(it);
@@ -1744,7 +1739,7 @@ static void drawList(Canvas& c, PageView& p, float dx, float alpha, bool active)
         c.fillCircle(sx + cosf(ang) * 6, sy + sinf(ang) * 6, 2.2f, col, listA);
         continue;
       }
-      if ((it == I_ROT || it == I_DARK || it == I_AXO_SHOW || it == I_CLICKS || it == I_SOUND) && v[0] &&
+      if ((it == I_ROT || it == I_AXO_SHOW || it == I_CLICKS || it == I_SOUND) && v[0] &&
           strcmp(v, T(S_OFF))) vc = lerpColor(PINK, DARK, k);
       c.textRight(F_SM, (int)(LIST_X + LIST_W - ROW_PAD + dx), ty - 1, v, vc, listA);
     }
@@ -2388,8 +2383,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
   last = now;
   fps += (1.f / dt - fps) * 0.05f;
 
-  if (S.dark && screen == SC_PRINT) pal::lamp();  // amber on black next to the resin
-  else pal::theme(S.theme);
+  pal::theme(S.theme);
   if (screen == SC_BOOT && now > 2.6f) afterBoot();
   if (turnPending && H.motorRpm() == 0) oneTurn();  // the vial has stopped: now the exact turn
   if (screen == SC_PRINT && everRx && !piOk()) {  // the Pi vanished mid-print: stop the motor here
@@ -2468,7 +2462,7 @@ int ui_frame(Canvas& c, uint32_t nowMs, float subMs) {
                 confirm.target == 0 && !fwFlashing && !updRun && now - lastInput > S.sleepMin * 60.f;
   if (sleepy != asleep) {
     asleep = sleepy;
-    H.brightness(asleep ? 0 : (screen == SC_PRINT && S.dark ? 10 : S.bright));
+    H.brightness(asleep ? 0 : S.bright);
   }
   spHide.step(dt, 14);
   static Ease axoFade;

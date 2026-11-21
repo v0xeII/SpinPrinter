@@ -29,8 +29,7 @@ of the main page, menus in Russian and English. Spinny the axolotl is optional.
   left or long press goes back):
   - Motor: test spin, speed, direction, ramp, microsteps, steps per turn, gear, "exactly 1 turn", zero
     (live tachometer on the left). Changes made while the motor spins are applied when it stops.
-  - Display: **Theme** (dark or light, both SpinSlicer's; with "dark while printing" the print screen
-    stays dark so it does not shine on the resin), brightness, language, dark screen while printing, **Sleep after** (backlight off after 1 / 5 /
+  - Display: **Theme** (dark or light, both SpinSlicer's), brightness, language, **Sleep after** (backlight off after 1 / 5 /
     15 / 30 idle minutes, 5 by default; the first touch only wakes it; a print, "Print?" and messages wake it); **Home**: Card (default: PRINT as a big card
     on top) or Axolotl (Spinny at the side); **Colour** of the axolotl: pink, gold, wild, black, blue, RGB.
   - Projector: Black, White, Grid, Focus, Circle, Center, Vial width.

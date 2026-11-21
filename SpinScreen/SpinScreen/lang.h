@@ -11,7 +11,7 @@ enum Str {
   // motor
   S_ROTATION, S_SPEED, S_DIRECTION, S_ACCEL, S_MICROSTEP, S_STEPS_REV, S_GEAR, S_ONEREV, S_ZERO,
   // screen
-  S_BRIGHT, S_LANG, S_DARK,
+  S_BRIGHT, S_LANG,
   // pi
   S_REBOOT, S_POWEROFF, S_SURE, S_SURE_HINT, S_REBOOT_SHORT, S_POWEROFF_SHORT,
   // files + setup
@@ -73,7 +73,7 @@ static const char* const STR[2][S_COUNT] = {
         "Чёрный", "Белый", "Сетка", "Фокус", "Круг", "Центровка", "Ширина колбы",
         "Вращение", "Скорость", "Направление", "Разгон", "Микрошаг", "Шагов/оборот", "Передача", "Ровно 1 оборот",
         "Обнулить угол",
-        "Яркость", "Язык", "Тёмный при печати",
+        "Яркость", "Язык",
         "Перезагрузить Raspberry", "Выключить Raspberry", "Точно?", "→ да · ← нет", "Перезагрузить", "Выключить",
         "Видео", "Загружаю список…", "Видео нет.", "Вставь флешку в Raspberry или загрузи по QR.", "USB",
         "Обороты", "Поправка", "Пауза до света", "ПЕЧАТЬ", "↑↓ выбор · → OK · ← назад", "с",
@@ -126,7 +126,7 @@ static const char* const STR[2][S_COUNT] = {
         "Black", "White", "Grid", "Focus", "Circle", "Centering", "Vial width",
         "Rotation", "Speed", "Direction", "Ramp", "Microsteps", "Steps/rev", "Gear ratio", "Exactly 1 turn",
         "Zero angle",
-        "Brightness", "Language", "Dark while printing",
+        "Brightness", "Language",
         "Reboot Raspberry", "Shut down Raspberry", "Sure?", "→ yes · ← no", "Reboot", "Shut down",
         "Videos", "Loading list…", "No videos.", "Plug a USB stick into the Raspberry or upload via QR.", "USB",
         "Turns", "Correction", "Dark spin-up", "PRINT", "↑↓ select · → OK · ← back", "s",
